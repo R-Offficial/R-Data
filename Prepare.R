@@ -9,6 +9,9 @@ library(rpart)
 library(e1071)
 library(randomForest)
 library(glmnet)
+library(corrplot)
+library(cluster)
+library(psych)
 
 prepare_data <- function(data,
                          target = names(data)[ncol(data)],
@@ -1069,4 +1072,929 @@ regression_model <- function(scale_train_x,
     MAPE = MAPE
 
   ))
+}
+
+
+
+# ==============================================================================
+# PROBABILITY DISTRIBUTION ANALYSIS
+# (Unified function from Assignment_05.R)
+# ==============================================================================
+
+#' Probability Distribution Analysis
+#'
+#' A unified function covering Binomial, Poisson, Normal, and Geometric
+#' distributions.  Computes PMF/PDF, CDF, quantiles, probabilities,
+#' fits observed frequencies, generates random samples, and produces
+#' side-by-side comparison plots.
+#'
+#' @param dist      Distribution type: "binomial", "poisson", "normal",
+#'                  or "geometric".
+#' @param action    What to compute:
+#'   \itemize{
+#'     \item \code{"pmf"}       PMF/PDF values (returned + plotted).
+#'     \item \code{"cdf"}       CDF values (returned + plotted).
+#'     \item \code{"prob"}      Exact, cumulative, tail, or interval
+#'                              probabilities.
+#'     \item \code{"quantile"}  Quantile / percentile lookup.
+#'     \item \code{"fit"}       Fit distribution to observed frequencies,
+#'                              print expected counts, overlay plot.
+#'     \item \code{"sample"}    Draw random sample, report empirical vs
+#'                              theoretical moments, bar/histogram plot.
+#'     \item \code{"compare"}   Side-by-side PMF comparison of two
+#'                              distributions (\code{compare_dist},
+#'                              \code{compare_params}).
+#'     \item \code{"joint"}     Joint / marginal probability table from a
+#'                              matrix (\code{joint_matrix}).
+#'     \item \code{"density"}   Plot density curve(s) for Normal.
+#'   }
+#' @param size      Binomial \code{n} (number of trials).
+#' @param prob      Success probability (Binomial / Geometric).
+#' @param lambda    Poisson rate parameter.
+#' @param mean      Normal mean (default 0).
+#' @param sd        Normal standard deviation (default 1).
+#' @param x         Integer vector of values for PMF/CDF.
+#'                  For \code{"prob"}: single value or length-2 interval.
+#' @param prob_type Probability query type (used with \code{action = "prob"}):
+#'                  "exact", "leq", "geq", "between".
+#' @param quantile_p  Probability for quantile lookup (e.g. 0.90).
+#' @param observed  Numeric vector of observed frequencies
+#'                  (used with \code{action = "fit"}).
+#' @param n_sample  Sample size for random generation
+#'                  (used with \code{action = "sample"}, default 1000).
+#' @param seed      Random seed (default 123).
+#' @param compare_dist  Second distribution for comparison ("binomial" or
+#'                      "poisson").
+#' @param compare_params Named list of params for the second distribution,
+#'                       e.g. \code{list(lambda = 5)}.
+#' @param joint_matrix  A numeric matrix for joint distribution analysis.
+#' @param plot      Logical; produce plots? (default TRUE).
+#'
+#' @return A list containing computed values, data frames, and summary text
+#'         (varies by action).
+#' @export
+probability_distribution <- function(dist      = "binomial",
+                                      action    = "pmf",
+                                      size      = NULL,
+                                      prob      = NULL,
+                                      lambda    = NULL,
+                                      mean      = 0,
+                                      sd        = 1,
+                                      x         = NULL,
+                                      prob_type = "exact",
+                                      quantile_p = NULL,
+                                      observed  = NULL,
+                                      n_sample  = 1000,
+                                      seed      = 123,
+                                      compare_dist   = NULL,
+                                      compare_params = NULL,
+                                      joint_matrix   = NULL,
+                                      plot      = TRUE) {
+
+  dist      <- tolower(dist)
+  action    <- tolower(action)
+  prob_type <- tolower(prob_type)
+
+  valid_dists   <- c("binomial", "poisson", "normal", "geometric")
+  valid_actions <- c("pmf", "cdf", "prob", "quantile", "fit",
+                     "sample", "compare", "joint", "density")
+
+  if (!dist %in% valid_dists) {
+    stop(paste("Choose distribution from:",
+               paste(valid_dists, collapse = ", ")))
+  }
+
+  if (!action %in% valid_actions) {
+    stop(paste("Choose action from:",
+               paste(valid_actions, collapse = ", ")))
+  }
+
+  results <- list()
+
+  cat("\n====================================\n")
+  cat("DISTRIBUTION:", toupper(dist), "| ACTION:", toupper(action), "\n")
+  cat("====================================\n")
+
+  # -------------------------------------------------------
+  # ACTION: PMF / PDF
+  # -------------------------------------------------------
+  if (action == "pmf") {
+
+    if (dist == "binomial") {
+      if (is.null(size) || is.null(prob))
+        stop("Binomial requires 'size' and 'prob'.")
+      if (is.null(x)) x <- 0:size
+      vals <- dbinom(x, size = size, prob = prob)
+      label <- paste0("PMF of Binomial(", size, ", ", prob, ")")
+    } else if (dist == "poisson") {
+      if (is.null(lambda))
+        stop("Poisson requires 'lambda'.")
+      if (is.null(x)) x <- 0:qpois(0.999, lambda)
+      vals <- dpois(x, lambda = lambda)
+      label <- paste0("PMF of Poisson(", lambda, ")")
+    } else if (dist == "normal") {
+      if (is.null(x))
+        x <- seq(mean - 4 * sd, mean + 4 * sd, length.out = 500)
+      vals <- dnorm(x, mean = mean, sd = sd)
+      label <- paste0("PDF of Normal(", mean, ", ", sd, ")")
+    } else if (dist == "geometric") {
+      if (is.null(prob))
+        stop("Geometric requires 'prob'.")
+      if (is.null(x)) x <- 0:qgeom(0.999, prob)
+      vals <- dgeom(x, prob = prob)
+      label <- paste0("PMF of Geometric(", prob, ")")
+    }
+
+    results$x     <- x
+    results$pmf   <- vals
+    results$table <- data.frame(x = x, probability = round(vals, 6))
+
+    if (plot) {
+      if (dist == "normal") {
+        plot(x, vals, type = "l", lwd = 2, col = "steelblue",
+             main = label, xlab = "x", ylab = "Density")
+        abline(v = mean, col = "red", lwd = 2, lty = 2)
+      } else {
+        plot(x, vals, type = "h", lwd = 2, col = "steelblue",
+             main = label, xlab = "x", ylab = "P(X = x)")
+        points(x, vals, pch = 16, col = "steelblue")
+      }
+    }
+
+    cat("\n========== PMF / PDF VALUES ==========\n")
+    print(results$table)
+
+  # -------------------------------------------------------
+  # ACTION: CDF
+  # -------------------------------------------------------
+  } else if (action == "cdf") {
+
+    if (dist == "binomial") {
+      if (is.null(size) || is.null(prob))
+        stop("Binomial requires 'size' and 'prob'.")
+      if (is.null(x)) x <- 0:size
+      vals <- pbinom(x, size = size, prob = prob)
+      label <- paste0("CDF of Binomial(", size, ", ", prob, ")")
+    } else if (dist == "poisson") {
+      if (is.null(lambda))
+        stop("Poisson requires 'lambda'.")
+      if (is.null(x)) x <- 0:qpois(0.999, lambda)
+      vals <- ppois(x, lambda = lambda)
+      label <- paste0("CDF of Poisson(", lambda, ")")
+    } else if (dist == "normal") {
+      if (is.null(x))
+        x <- seq(mean - 4 * sd, mean + 4 * sd, length.out = 500)
+      vals <- pnorm(x, mean = mean, sd = sd)
+      label <- paste0("CDF of Normal(", mean, ", ", sd, ")")
+    } else if (dist == "geometric") {
+      if (is.null(prob))
+        stop("Geometric requires 'prob'.")
+      if (is.null(x)) x <- 0:qgeom(0.999, prob)
+      vals <- pgeom(x, prob = prob)
+      label <- paste0("CDF of Geometric(", prob, ")")
+    }
+
+    results$x     <- x
+    results$cdf   <- vals
+    results$table <- data.frame(x = x, cumulative_prob = round(vals, 6))
+
+    if (plot) {
+      plot(x, vals, type = "s", lwd = 2, col = "darkred",
+           main = label, xlab = "x", ylab = "P(X <= x)")
+    }
+
+    cat("\n========== CDF VALUES ==========\n")
+    print(results$table)
+
+  # -------------------------------------------------------
+  # ACTION: PROB (exact / leq / geq / between)
+  # -------------------------------------------------------
+  } else if (action == "prob") {
+
+    if (!prob_type %in% c("exact", "leq", "geq", "between")) {
+      stop("prob_type must be 'exact', 'leq', 'geq', or 'between'.")
+    }
+
+    if (is.null(x)) stop("Provide 'x' for probability calculation.")
+
+    compute_prob <- function(d, val, pt) {
+      if (d == "binomial") {
+        if (is.null(size) || is.null(prob))
+          stop("Binomial requires 'size' and 'prob'.")
+        if (pt == "exact")   return(dbinom(val, size, prob))
+        if (pt == "leq")     return(pbinom(val, size, prob))
+        if (pt == "geq")     return(1 - pbinom(val - 1, size, prob))
+        if (pt == "between") return(pbinom(val[2], size, prob) -
+                                      pbinom(val[1] - 1, size, prob))
+      } else if (d == "poisson") {
+        if (is.null(lambda))
+          stop("Poisson requires 'lambda'.")
+        if (pt == "exact")   return(dpois(val, lambda))
+        if (pt == "leq")     return(ppois(val, lambda))
+        if (pt == "geq")     return(1 - ppois(val - 1, lambda))
+        if (pt == "between") return(ppois(val[2], lambda) -
+                                      ppois(val[1] - 1, lambda))
+      } else if (d == "normal") {
+        if (pt == "exact")
+          stop("Normal is continuous; use 'leq', 'geq', or 'between'.")
+        if (pt == "leq")     return(pnorm(val, mean, sd))
+        if (pt == "geq")     return(1 - pnorm(val, mean, sd))
+        if (pt == "between") return(pnorm(val[2], mean, sd) -
+                                      pnorm(val[1], mean, sd))
+      } else if (d == "geometric") {
+        if (is.null(prob))
+          stop("Geometric requires 'prob'.")
+        if (pt == "exact")   return(dgeom(val, prob))
+        if (pt == "leq")     return(pgeom(val, prob))
+        if (pt == "geq")     return(1 - pgeom(val - 1, prob))
+        if (pt == "between") return(pgeom(val[2], prob) -
+                                      pgeom(val[1] - 1, prob))
+      }
+    }
+
+    result_prob <- compute_prob(dist, x, prob_type)
+
+    results$probability <- result_prob
+    results$prob_type   <- prob_type
+    results$x           <- x
+
+    cat("\nP(", prob_type, ") =", round(result_prob, 6), "\n")
+
+  # -------------------------------------------------------
+  # ACTION: QUANTILE
+  # -------------------------------------------------------
+  } else if (action == "quantile") {
+
+    if (is.null(quantile_p))
+      stop("Provide 'quantile_p' (e.g. 0.90).")
+
+    if (dist == "binomial") {
+      if (is.null(size) || is.null(prob))
+        stop("Binomial requires 'size' and 'prob'.")
+      q_val <- qbinom(quantile_p, size, prob)
+    } else if (dist == "poisson") {
+      if (is.null(lambda))
+        stop("Poisson requires 'lambda'.")
+      q_val <- qpois(quantile_p, lambda)
+    } else if (dist == "normal") {
+      q_val <- qnorm(quantile_p, mean, sd)
+    } else if (dist == "geometric") {
+      if (is.null(prob))
+        stop("Geometric requires 'prob'.")
+      q_val <- qgeom(quantile_p, prob)
+    }
+
+    results$quantile   <- q_val
+    results$quantile_p <- quantile_p
+
+    cat("\n", quantile_p * 100, "th percentile =", q_val, "\n")
+
+  # -------------------------------------------------------
+  # ACTION: FIT observed frequencies
+  # -------------------------------------------------------
+  } else if (action == "fit") {
+
+    if (is.null(observed))
+      stop("Provide 'observed' frequency vector.")
+
+    N <- sum(observed)
+    x_vals <- 0:(length(observed) - 1)
+
+    if (dist == "binomial") {
+      n_trials <- length(observed) - 1
+      mean_x   <- sum(x_vals * observed) / N
+      p_hat    <- mean_x / n_trials
+      fitted_p <- dbinom(x_vals, n_trials, p_hat)
+      est_label <- paste("Estimated p =", round(p_hat, 4))
+      results$estimated_p <- p_hat
+    } else if (dist == "poisson") {
+      lambda_hat <- sum(x_vals * observed) / N
+      fitted_p   <- dpois(x_vals, lambda_hat)
+      est_label  <- paste("Estimated lambda =", round(lambda_hat, 4))
+      results$estimated_lambda <- lambda_hat
+    } else {
+      stop("Fit action is supported only for 'binomial' and 'poisson'.")
+    }
+
+    expected <- fitted_p * N
+
+    fit_table <- data.frame(
+      x            = x_vals,
+      observed     = observed,
+      fitted_prob  = round(fitted_p, 4),
+      expected     = round(expected, 2)
+    )
+
+    results$fit_table <- fit_table
+
+    cat("\n", est_label, "\n")
+    cat("\n========== FIT TABLE ==========\n")
+    print(fit_table)
+
+    if (plot) {
+      plot(x_vals, observed, type = "h", lwd = 5, col = "steelblue",
+           main = paste("Observed vs Fitted", toupper(dist), "Frequencies"),
+           xlab = "x", ylab = "Frequency",
+           ylim = c(0, max(observed, expected) + 5))
+      points(x_vals + 0.12, expected, type = "h", lwd = 5, col = "red")
+      legend("topright",
+             legend = c("Observed", "Fitted"),
+             col    = c("steelblue", "red"), lwd = 3)
+    }
+
+  # -------------------------------------------------------
+  # ACTION: SAMPLE
+  # -------------------------------------------------------
+  } else if (action == "sample") {
+
+    set.seed(seed)
+
+    if (dist == "binomial") {
+      if (is.null(size) || is.null(prob))
+        stop("Binomial requires 'size' and 'prob'.")
+      samp   <- rbinom(n_sample, size, prob)
+      t_mean <- size * prob
+      t_sd   <- sqrt(size * prob * (1 - prob))
+    } else if (dist == "poisson") {
+      if (is.null(lambda))
+        stop("Poisson requires 'lambda'.")
+      samp   <- rpois(n_sample, lambda)
+      t_mean <- lambda
+      t_sd   <- sqrt(lambda)
+    } else if (dist == "normal") {
+      samp   <- rnorm(n_sample, mean, sd)
+      t_mean <- mean
+      t_sd   <- sd
+    } else if (dist == "geometric") {
+      if (is.null(prob))
+        stop("Geometric requires 'prob'.")
+      samp   <- rgeom(n_sample, prob)
+      t_mean <- (1 - prob) / prob
+      t_sd   <- sqrt((1 - prob) / prob^2)
+    }
+
+    emp_mean <- base::mean(samp)
+    emp_sd   <- stats::sd(samp)
+
+    results$sample           <- samp
+    results$empirical_mean   <- emp_mean
+    results$empirical_sd     <- emp_sd
+    results$theoretical_mean <- t_mean
+    results$theoretical_sd   <- t_sd
+
+    cat("\nSample size:", n_sample, "\n")
+    cat("Empirical  mean =", round(emp_mean, 3),
+        " | Theoretical mean =", round(t_mean, 3), "\n")
+    cat("Empirical  sd   =", round(emp_sd, 3),
+        " | Theoretical sd   =", round(t_sd, 3), "\n")
+
+    if (plot) {
+      if (dist == "normal") {
+        hist(samp, breaks = 30, col = "steelblue", border = "white",
+             main = paste("Random Sample from", toupper(dist)),
+             xlab = "Value", freq = FALSE)
+        curve(dnorm(x, mean, sd), add = TRUE, col = "red", lwd = 2)
+      } else {
+        barplot(table(samp), col = "steelblue",
+                main = paste("Random Sample from", toupper(dist)),
+                xlab = "Value", ylab = "Frequency")
+      }
+    }
+
+  # -------------------------------------------------------
+  # ACTION: COMPARE two distributions
+  # -------------------------------------------------------
+  } else if (action == "compare") {
+
+    if (is.null(compare_dist) || is.null(compare_params))
+      stop("Provide 'compare_dist' and 'compare_params' for comparison.")
+
+    # Primary distribution PMF
+    if (dist == "binomial") {
+      if (is.null(size) || is.null(prob))
+        stop("Binomial requires 'size' and 'prob'.")
+      if (is.null(x)) x <- 0:(size + 5)
+      pmf1  <- dbinom(x, size, prob)
+      lab1  <- paste0("Binomial(", size, ", ", prob, ")")
+    } else if (dist == "poisson") {
+      if (is.null(lambda))
+        stop("Poisson requires 'lambda'.")
+      if (is.null(x)) x <- 0:qpois(0.999, lambda)
+      pmf1  <- dpois(x, lambda)
+      lab1  <- paste0("Poisson(", lambda, ")")
+    } else {
+      stop("Compare action supports 'binomial' and 'poisson' only.")
+    }
+
+    # Second distribution PMF
+    cd <- tolower(compare_dist)
+    if (cd == "binomial") {
+      pmf2 <- dbinom(x, compare_params$size, compare_params$prob)
+      lab2 <- paste0("Binomial(", compare_params$size,
+                     ", ", compare_params$prob, ")")
+    } else if (cd == "poisson") {
+      pmf2 <- dpois(x, compare_params$lambda)
+      lab2 <- paste0("Poisson(", compare_params$lambda, ")")
+    } else {
+      stop("compare_dist must be 'binomial' or 'poisson'.")
+    }
+
+    results$x    <- x
+    results$pmf1 <- pmf1
+    results$pmf2 <- pmf2
+
+    if (plot) {
+      plot(x, pmf1, type = "h", lwd = 5, col = "steelblue",
+           main = paste("PMF Comparison:", lab1, "vs", lab2),
+           xlab = "x", ylab = "P(X = x)",
+           ylim = c(0, max(pmf1, pmf2) + 0.03))
+      points(x + 0.15, pmf2, type = "h", lwd = 5, col = "red")
+      legend("topright", legend = c(lab1, lab2),
+             col = c("steelblue", "red"), lwd = 3)
+    }
+
+    cat("\nComparison plotted.\n")
+
+  # -------------------------------------------------------
+  # ACTION: JOINT probability table
+  # -------------------------------------------------------
+  } else if (action == "joint") {
+
+    if (is.null(joint_matrix) || !is.matrix(joint_matrix))
+      stop("Provide a numeric 'joint_matrix'.")
+
+    results$joint_freq     <- joint_matrix
+    results$joint_prob     <- prop.table(joint_matrix)
+    results$marginal_row   <- rowSums(joint_matrix)
+    results$marginal_col   <- colSums(joint_matrix)
+
+    cat("\n========== JOINT FREQUENCY TABLE ==========\n")
+    print(joint_matrix)
+    cat("\n========== JOINT PROBABILITY TABLE ==========\n")
+    print(round(results$joint_prob, 4))
+    cat("\nMarginal distribution of rows (row sums):\n")
+    print(results$marginal_row)
+    cat("\nMarginal distribution of columns (column sums):\n")
+    print(results$marginal_col)
+
+  # -------------------------------------------------------
+  # ACTION: DENSITY curves (Normal)
+  # -------------------------------------------------------
+  } else if (action == "density") {
+
+    if (dist != "normal")
+      stop("Density curve action is for 'normal' distribution only.")
+
+    if (is.null(x))
+      x <- seq(mean - 4 * max(sd, 1), mean + 4 * max(sd, 1),
+               length.out = 500)
+
+    y <- dnorm(x, mean = mean, sd = sd)
+
+    results$x <- x
+    results$density <- y
+
+    if (plot) {
+      plot(x, y, type = "l", lwd = 2, col = "steelblue",
+           main = paste0("Density of N(", mean, ", ", sd, "^2)"),
+           xlab = "x", ylab = "Density")
+      abline(v = mean, col = "red", lwd = 2, lty = 2)
+    }
+
+    cat("\nDensity curve plotted for N(", mean, ",", sd, "^2).\n")
+  }
+
+  cat("\n====================================\n")
+
+  invisible(results)
+}
+
+
+# ==============================================================================
+# CLUSTERING ANALYSIS
+# (Unified function from assignment7_answers.R)
+# ==============================================================================
+
+#' Clustering Analysis
+#'
+#' Performs end-to-end unsupervised clustering: data exploration,
+#' correlation analysis, PCA, K-Means (with Elbow and Silhouette),
+#' Hierarchical Clustering (with dendrogram), cluster profiling,
+#' and statistical tests (t-test, Wilcoxon, ANOVA, Tukey, Chi-squared).
+#'
+#' @param data          A data frame.
+#' @param num_cols      Character vector of numeric column names to use
+#'                      for clustering.  If NULL, all numeric columns are
+#'                      used.
+#' @param k             Number of clusters for K-Means and Hierarchical
+#'                      (default 3).
+#' @param max_k         Maximum k to evaluate in the Elbow method
+#'                      (default 10).
+#' @param hc_method     Linkage method for hierarchical clustering
+#'                      (default "ward.D2").
+#' @param profile_cols  Character vector of column names to profile /
+#'                      aggregate by cluster.  Defaults to \code{num_cols}.
+#' @param cat_cols      Character vector of categorical columns for
+#'                      chi-squared tests against clusters (e.g.
+#'                      \code{c("VisitorType", "Revenue")}).
+#' @param test_var      Name of a numeric variable for statistical tests
+#'                      (t-test, Wilcoxon, ANOVA) across clusters.
+#' @param test_clusters Integer vector of length 2 — which two clusters to
+#'                      use for pairwise t-test / Wilcoxon (default c(1,2)).
+#' @param cor_threshold Threshold for flagging high correlations
+#'                      (default 0.7).
+#' @param seed          Random seed (default 123).
+#' @param plot          Logical; produce plots? (default TRUE).
+#'
+#' @return A list containing:
+#'   \itemize{
+#'     \item \code{scaled_data}       Scaled numeric matrix.
+#'     \item \code{cor_matrix}        Correlation matrix.
+#'     \item \code{high_corr}         Pairs above \code{cor_threshold}.
+#'     \item \code{pca}               PCA result (\code{prcomp} object).
+#'     \item \code{variance_explained} Proportion of variance per PC.
+#'     \item \code{wcss}              Within-cluster SS for k = 1..max_k.
+#'     \item \code{kmeans}            K-Means result.
+#'     \item \code{km_centroids}      Centroid means per cluster.
+#'     \item \code{km_silhouette}     Mean silhouette width.
+#'     \item \code{hclust}            Hierarchical clustering result.
+#'     \item \code{hc_clusters}       Hierarchical cluster assignments.
+#'     \item \code{cross_table}       KMeans vs Hierarchical cross-tab.
+#'     \item \code{cluster_profile}   Aggregate means by cluster.
+#'     \item \code{ttest}             Welch t-test result (if applicable).
+#'     \item \code{wilcox}            Wilcoxon test result (if applicable).
+#'     \item \code{anova}             ANOVA result (if applicable).
+#'     \item \code{tukey}             Tukey HSD result (if applicable).
+#'     \item \code{chisq_tests}       List of chi-squared test results.
+#'   }
+#' @export
+clustering_analysis <- function(data,
+                                 num_cols       = NULL,
+                                 k              = 3,
+                                 max_k          = 10,
+                                 hc_method      = "ward.D2",
+                                 profile_cols   = NULL,
+                                 cat_cols       = NULL,
+                                 test_var       = NULL,
+                                 test_clusters  = c(1, 2),
+                                 cor_threshold  = 0.7,
+                                 seed           = 123,
+                                 plot           = TRUE) {
+
+  if (!is.data.frame(data) || nrow(data) == 0) {
+    stop("Provide a non-empty data frame.")
+  }
+
+  results <- list()
+
+  # ==========================================
+  # 1. BASIC EXPLORATION
+  # ==========================================
+
+  cat("\n========== DATASET INFORMATION ==========\n")
+  cat("Dimensions:", dim(data), "\n")
+  cat("\nStructure:\n")
+  str(data)
+  cat("\nSummary:\n")
+  print(summary(data))
+  cat("\nMissing values per column:\n")
+  print(colSums(is.na(data)))
+
+  # ==========================================
+  # 2. REMOVE DUPLICATES
+  # ==========================================
+
+  original_rows <- nrow(data)
+  data <- data[!duplicated(data), ]
+  dup_removed   <- original_rows - nrow(data)
+
+  cat("\nOriginal rows:", original_rows,
+      "| Cleaned rows:", nrow(data),
+      "| Duplicates removed:", dup_removed, "\n")
+
+  results$cleaned_data <- data
+
+  # ==========================================
+  # 3. SELECT NUMERIC COLUMNS
+  # ==========================================
+
+  if (is.null(num_cols)) {
+    num_cols <- names(data)[sapply(data, is.numeric)]
+    cat("\nAuto-detected numeric columns:",
+        paste(num_cols, collapse = ", "), "\n")
+  }
+
+  if (length(num_cols) < 2)
+    stop("Need at least 2 numeric columns for clustering.")
+
+  df_num <- data[, num_cols, drop = FALSE]
+
+  if (is.null(profile_cols)) profile_cols <- num_cols
+
+  # ==========================================
+  # 4. SCALING
+  # ==========================================
+
+  scaled_num <- scale(df_num)
+  results$scaled_data <- scaled_num
+
+  cat("\n========== SCALING DONE ==========\n")
+
+  # ==========================================
+  # 5. HISTOGRAMS
+  # ==========================================
+
+  if (plot) {
+    n_cols <- length(num_cols)
+    n_row  <- ceiling(n_cols / 5)
+    par(mfrow = c(n_row, min(n_cols, 5)), mar = c(3, 3, 2, 1))
+    for (col in num_cols) {
+      hist(df_num[[col]], main = col, col = "skyblue",
+           xlab = "", border = "white")
+    }
+    par(mfrow = c(1, 1))
+  }
+
+  # ==========================================
+  # 6. CORRELATION ANALYSIS
+  # ==========================================
+
+  cor_matrix <- cor(df_num, use = "complete.obs")
+  results$cor_matrix <- cor_matrix
+
+  if (plot) {
+    if (requireNamespace("corrplot", quietly = TRUE)) {
+      corrplot::corrplot(cor_matrix, method = "circle",
+                         type = "upper", tl.col = "black", tl.srt = 45)
+    }
+  }
+
+  high_corr <- which(
+    abs(cor_matrix) > cor_threshold & abs(cor_matrix) < 1,
+    arr.ind = TRUE
+  )
+
+  results$high_corr <- high_corr
+
+  cat("\n========== HIGH CORRELATIONS (>",
+      cor_threshold, ") ==========\n")
+  print(high_corr)
+
+  # ==========================================
+  # 7. PCA
+  # ==========================================
+
+  pca_res <- prcomp(scaled_num, center = TRUE, scale. = FALSE)
+  results$pca <- pca_res
+
+  var_explained <- (pca_res$sdev)^2 / sum((pca_res$sdev)^2)
+  results$variance_explained <- var_explained
+
+  cat("\n========== PCA SUMMARY ==========\n")
+  print(summary(pca_res))
+
+  if (plot) {
+    # Scree plot
+    plot(var_explained, type = "b", pch = 19, col = "blue",
+         xlab = "Principal Component",
+         ylab = "Proportion of Variance Explained",
+         main = "Scree Plot")
+
+    # PC1 vs PC2
+    plot(pca_res$x[, 1], pca_res$x[, 2],
+         col = rgb(0, 0.4, 0.8, 0.3), pch = 16,
+         xlab = "PC1", ylab = "PC2",
+         main = "PCA Observation Plot (PC1 vs PC2)")
+  }
+
+  # ==========================================
+  # 8. ELBOW METHOD
+  # ==========================================
+
+  set.seed(seed)
+  wcss <- numeric(max_k)
+  for (i in 1:max_k) {
+    wcss[i] <- sum(
+      kmeans(scaled_num, centers = i, nstart = 10)$withinss
+    )
+  }
+  results$wcss <- wcss
+
+  if (plot) {
+    plot(1:max_k, wcss, type = "b", pch = 19, col = "darkgreen",
+         xlab = "Number of Clusters (k)",
+         ylab = "Total Within-Cluster SS",
+         main = "Elbow Method for Optimal k")
+  }
+
+  # ==========================================
+  # 9. K-MEANS CLUSTERING
+  # ==========================================
+
+  set.seed(seed)
+  km_res <- kmeans(scaled_num, centers = k, nstart = 25)
+  results$kmeans <- km_res
+
+  data$km_cluster <- as.factor(km_res$cluster)
+
+  # Centroids
+  centroids_km <- aggregate(
+    df_num,
+    by = list(Cluster = km_res$cluster),
+    mean
+  )
+  results$km_centroids <- centroids_km
+
+  cat("\n========== K-MEANS CENTROIDS (k =", k, ") ==========\n")
+  print(round(centroids_km, 2))
+
+  if (plot) {
+    plot(pca_res$x[, 1], pca_res$x[, 2],
+         col = km_res$cluster, pch = 16,
+         xlab = "PC1", ylab = "PC2",
+         main = paste("K-Means Clusters (k =", k, ")"))
+    legend("topright",
+           legend = paste("Cluster", 1:k),
+           col = 1:k, pch = 16)
+  }
+
+  # ==========================================
+  # 10. SILHOUETTE
+  # ==========================================
+
+  if (requireNamespace("cluster", quietly = TRUE)) {
+    dist_matrix <- dist(scaled_num)
+    sil_km <- cluster::silhouette(km_res$cluster, dist_matrix)
+    mean_sil <- base::mean(sil_km[, 3])
+    results$km_silhouette <- mean_sil
+
+    cat("\nMean Silhouette Width:", round(mean_sil, 4), "\n")
+
+    if (plot) {
+      plot(sil_km, col = 1:k, border = NA,
+           main = "Silhouette Plot for K-Means")
+    }
+  }
+
+  # ==========================================
+  # 11. HIERARCHICAL CLUSTERING
+  # ==========================================
+
+  dist_matrix <- dist(scaled_num)
+  hc_res <- hclust(dist_matrix, method = hc_method)
+  results$hclust <- hc_res
+
+  hc_clusters <- cutree(hc_res, k = k)
+  data$hc_cluster <- as.factor(hc_clusters)
+  results$hc_clusters <- hc_clusters
+
+  if (plot) {
+    plot(hc_res,
+         main = paste("Dendrogram (", hc_method, " Linkage)"),
+         xlab = "", sub = "", labels = FALSE)
+    rect.hclust(hc_res, k = k, border = "red")
+  }
+
+  # ==========================================
+  # 12. CROSS-TABULATION
+  # ==========================================
+
+  cross_tab <- table(
+    KMeans       = data$km_cluster,
+    Hierarchical = data$hc_cluster
+  )
+  results$cross_table <- cross_tab
+
+  cat("\n========== K-MEANS vs HIERARCHICAL ==========\n")
+  print(cross_tab)
+
+  # ==========================================
+  # 13. CLUSTER PROFILING
+  # ==========================================
+
+  valid_profile <- intersect(profile_cols, names(data))
+  if (length(valid_profile) > 0) {
+    profile_formula <- as.formula(
+      paste("cbind(",
+            paste(valid_profile, collapse = ", "),
+            ") ~ km_cluster")
+    )
+    cluster_profile <- aggregate(
+      profile_formula,
+      data = data,
+      FUN  = base::mean
+    )
+    results$cluster_profile <- cluster_profile
+
+    cat("\n========== CLUSTER PROFILE (MEANS) ==========\n")
+    print(round(cluster_profile, 2))
+  }
+
+  # ==========================================
+  # 14. STATISTICAL TESTS
+  # ==========================================
+
+  if (!is.null(test_var)) {
+
+    if (!test_var %in% names(data))
+      stop(paste("test_var", test_var, "not found in data."))
+
+    cat("\n========== STATISTICAL TESTS on",
+        test_var, "==========\n")
+
+    # Confidence intervals per cluster
+    calc_ci <- function(x) {
+      res <- t.test(x)
+      c(Mean     = base::mean(x),
+        Std_Dev  = stats::sd(x),
+        CI_Lower = res$conf.int[1],
+        CI_Upper = res$conf.int[2])
+    }
+    ci_by_cluster <- by(data[[test_var]], data$km_cluster, calc_ci)
+
+    cat("\nConfidence Intervals by Cluster:\n")
+    print(ci_by_cluster)
+
+    # Pairwise t-test
+    c1 <- data[[test_var]][data$km_cluster == test_clusters[1]]
+    c2 <- data[[test_var]][data$km_cluster == test_clusters[2]]
+
+    if (length(c1) > 1 && length(c2) > 1) {
+      ttest_res  <- t.test(c1, c2, var.equal = FALSE)
+      wilcox_res <- wilcox.test(c1, c2)
+
+      results$ttest  <- ttest_res
+      results$wilcox <- wilcox_res
+
+      cat("\n--- Welch t-test (Cluster", test_clusters[1],
+          "vs", test_clusters[2], ") ---\n")
+      print(ttest_res)
+
+      cat("\n--- Wilcoxon Rank-Sum Test ---\n")
+      print(wilcox_res)
+    }
+
+    # ANOVA + Tukey
+    anova_res <- aov(
+      as.formula(paste(test_var, "~ km_cluster")),
+      data = data
+    )
+    results$anova <- anova_res
+
+    cat("\n--- ANOVA ---\n")
+    print(summary(anova_res))
+
+    tukey_res <- TukeyHSD(anova_res)
+    results$tukey <- tukey_res
+
+    cat("\n--- Tukey HSD ---\n")
+    print(tukey_res)
+
+    # Descriptive by cluster
+    if (requireNamespace("psych", quietly = TRUE)) {
+      cat("\n--- Descriptive Statistics by Cluster ---\n")
+      print(psych::describeBy(
+        data[[test_var]],
+        group = data$km_cluster,
+        mat   = TRUE
+      ))
+    }
+  }
+
+  # ==========================================
+  # 15. CHI-SQUARED TESTS
+  # ==========================================
+
+  if (!is.null(cat_cols)) {
+
+    results$chisq_tests <- list()
+
+    cat("\n========== CHI-SQUARED TESTS ==========\n")
+
+    for (cc in cat_cols) {
+      if (!cc %in% names(data)) {
+        cat("Warning:", cc, "not found, skipping.\n")
+        next
+      }
+
+      ct <- table(data$km_cluster, data[[cc]])
+      chi_res <- chisq.test(ct)
+      results$chisq_tests[[cc]] <- chi_res
+
+      cat("\n--- Chi-squared test: km_cluster vs", cc, "---\n")
+      print(chi_res)
+
+      cat("\nContingency Table:\n")
+      print(ct)
+    }
+  }
+
+  # ==========================================
+  # 16. RETURN
+  # ==========================================
+
+  cat("\n========== CLUSTERING ANALYSIS COMPLETE ==========\n")
+
+  results$data <- data
+  invisible(results)
 }
