@@ -2000,7 +2000,7 @@ clustering_analysis <- function(data,
 }
 
 
-get_mode <- function(v) {
+mode <- function(v) {
   uniqv <- unique(v)
   uniqv[which.max(tabulate(match(v, uniqv)))]
 }
