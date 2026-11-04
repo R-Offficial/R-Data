@@ -1,6 +1,6 @@
 # R Machine Learning Pipeline
 
-A lightweight, automated R utility for data preprocessing, classification, regression modeling, probability distributions, and clustering analysis.
+A lightweight, automated R utility for data preprocessing, classification, regression modeling, probability distributions, clustering analysis, and exploratory data visualization.
 
 ---
 
@@ -200,7 +200,7 @@ probability_distribution(
 | `"joint"` | Joint and marginal probability table from a matrix |
 | `"density"` | Normal density curve plot |
 
-**Returns** a list containing computed values, tables, and parameters (varies by action).
+**Returns:** A list containing computed values, tables, and parameters (varies by action).
 
 ---
 
@@ -243,7 +243,6 @@ result <- clustering_analysis(
 14. Chi-squared tests for each column in `cat_cols`
 
 **Returns:**
-
 - `result$scaled_data`: Scaled numeric matrix.
 - `result$cor_matrix`: Correlation matrix.
 - `result$high_corr`: Pairs exceeding the correlation threshold.
@@ -263,6 +262,44 @@ result <- clustering_analysis(
 - `result$tukey`: Tukey HSD result.
 - `result$chisq_tests`: Named list of chi-squared test results.
 - `result$data`: Original data with `km_cluster` and `hc_cluster` columns added.
+
+---
+
+### 2.6 `generate_plot()`
+
+A unified plotting function supporting 7 key chart types: histograms, frequency polygons, bar charts, box plots, pie charts, line plots, and scatter plots.
+
+```R
+generate_plot(
+  data,
+  type        = c("hist", "freq_poly", "bar", "box", "pie", "line", "scatter"),
+  x           = NULL,        # Primary variable column name
+  y           = NULL,        # Secondary variable column name (optional / dependent on type)
+  group       = NULL,        # Categorical variable for coloring / symbols
+  breaks      = NULL,        # Custom bin breaks (hist / freq_poly)
+  horiz       = FALSE,       # Horizontal bars for type = "bar"
+  show_labels = TRUE,        # Value / count labels on bars & bins
+  add_reg     = TRUE,        # Linear regression trendline for scatter
+  show_grid   = TRUE,        # Background grid
+  col         = NULL,        # Custom color vector
+  main        = NULL,        # Plot title
+  xlab        = NULL,        # X-axis label
+  ylab        = NULL,        # Y-axis label
+  ...
+)
+```
+
+#### Supported Plot Types:
+
+| `type` | Description | Typical Arguments |
+|---|---|---|
+| `"hist"` | Histogram with bin labels | `x = "Marks", breaks = seq(50, 100, 10)` |
+| `"freq_poly"` | Frequency polygon with points and lines | `x = "Marks", breaks = seq(50, 100, 10)` |
+| `"bar"` | Vertical or horizontal count bar plot | `x = "Department"`, `horiz = TRUE` |
+| `"box"` | Univariate or grouped box plot with IQR/SD | `x = "Marks"` or `x = "Department", y = "Marks"` |
+| `"pie"` | Pie chart with slices, percentages, and labels | `x = "Department"` |
+| `"line"` | Line plot with category axis | `x = "Marks", y = "Student_ID"` |
+| `"scatter"` | Scatter plot with regression line & correlation | `x = "Study_Hours", y = "Marks", group = "Department"` |
 
 ---
 
@@ -403,19 +440,19 @@ source("https://raw.githubusercontent.com/R-Offficial/R-Data/main/Prepare.R")
 df <- read.csv("online_shoppers_intention.csv")
 
 result <- clustering_analysis(
-  data      = df,
-  num_cols  = c("Administrative", "Administrative_Duration",
-                "Informational", "Informational_Duration",
-                "ProductRelated", "ProductRelated_Duration",
-                "BounceRates", "ExitRates", "PageValues", "SpecialDay"),
-  k         = 3,
-  max_k     = 10,
-  hc_method = "ward.D2",
-  test_var  = "PageValues",
+  data          = df,
+  num_cols      = c("Administrative", "Administrative_Duration",
+                    "Informational", "Informational_Duration",
+                    "ProductRelated", "ProductRelated_Duration",
+                    "BounceRates", "ExitRates", "PageValues", "SpecialDay"),
+  k             = 3,
+  max_k         = 10,
+  hc_method     = "ward.D2",
+  test_var      = "PageValues",
   test_clusters = c(1, 2),
-  cat_cols  = c("VisitorType", "Revenue"),
+  cat_cols      = c("VisitorType", "Revenue"),
   cor_threshold = 0.7,
-  seed      = 123
+  seed          = 123
 )
 
 # Access results
@@ -428,4 +465,35 @@ result$anova               # ANOVA result
 result$tukey               # Tukey HSD
 result$chisq_tests         # Chi-squared tests
 result$data                # Data with cluster labels
+```
+
+---
+
+### 3.5 Data Visualization Examples (`generate_plot`)
+
+```R
+source("https://raw.githubusercontent.com/R-Offficial/R-Data/main/Prepare.R")
+
+# 1. Histogram
+generate_plot(df, type = "hist", x = "Marks", breaks = seq(50, 100, by = 10))
+
+# 2. Frequency Polygon
+generate_plot(df, type = "freq_poly", x = "Marks", breaks = seq(50, 100, by = 10))
+
+# 3. Bar Plots (Vertical & Horizontal)
+generate_plot(df, type = "bar", x = "Department")
+generate_plot(df, type = "bar", x = "Department", horiz = TRUE)
+
+# 4. Box Plots (Univariate & Grouped)
+generate_plot(df, type = "box", x = "Marks")
+generate_plot(df, type = "box", x = "Department", y = "Marks")
+
+# 5. Pie Chart (with Categories & Percentages)
+generate_plot(df, type = "pie", x = "Department")
+
+# 6. Line Plot (mapped to index or custom ID)
+generate_plot(df, type = "line", x = "Marks", y = "Student_ID")
+
+# 7. Scatter Plot (Regression Line, Grouping & Correlation)
+generate_plot(df, type = "scatter", x = "Study_Hours", y = "Marks", group = "Department")
 ```

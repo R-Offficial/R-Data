@@ -2004,3 +2004,246 @@ mode <- function(v) {
   uniqv <- unique(v)
   uniqv[which.max(tabulate(match(v, uniqv)))]
 }
+
+
+#' Universal Plotting Function
+#'
+#' @param data A data frame or tibble
+#' @param type Plot type: "hist", "freq_poly", "bar", "box", "pie", "line", or "scatter"
+#' @param x Primary variable (character string of column name, e.g., "Marks", "Department")
+#' @param y Secondary variable (character string of column name, optional depending on plot type)
+#' @param group Optional categorical variable for grouping (colors, points, or subsets)
+#' @param breaks Bin breaks or count for histogram / frequency polygon (e.g., seq(50, 100, 10))
+#' @param horiz Logical; if TRUE, renders horizontal bar plots (default: FALSE)
+#' @param show_labels Logical; whether to show text labels / counts on bars or bins (default: TRUE)
+#' @param add_reg Logical; whether to draw linear regression line on scatter plot (default: TRUE)
+#' @param show_grid Logical; whether to add a background grid (default: TRUE)
+#' @param col Custom colors vector (optional)
+#' @param main Custom title (optional)
+#' @param xlab Custom X-axis label (optional)
+#' @param ylab Custom Y-axis label (optional)
+
+generate_plot <- function(data,
+                          type = c("hist", "freq_poly", "bar", "box", "pie", "line", "scatter"),
+                          x = NULL,
+                          y = NULL,
+                          group = NULL,
+                          breaks = NULL,
+                          horiz = FALSE,
+                          show_labels = TRUE,
+                          add_reg = TRUE,
+                          show_grid = TRUE,
+                          col = NULL,
+                          main = NULL,
+                          xlab = NULL,
+                          ylab = NULL,
+                          ...) {
+  
+  type <- match.arg(type)
+  df <- as.data.frame(data)
+  
+  if (is.null(x)) stop("Please provide the variable 'x'.")
+  if (!x %in% names(df)) stop(paste("Column", x, "not found in dataset."))
+  if (!is.null(y) && !y %in% names(df)) stop(paste("Column", y, "not found in dataset."))
+  if (!is.null(group) && !group %in% names(df)) stop(paste("Column", group, "not found in dataset."))
+  
+  # =========================================================================
+  # 1. HISTOGRAM
+  # =========================================================================
+  if (type == "hist") {
+    vals <- df[[x]]
+    if (!is.numeric(vals)) stop("Histogram requires numeric 'x'.")
+    
+    if (is.null(breaks)) {
+      h <- hist(vals, plot = FALSE)
+    } else {
+      h <- hist(vals, breaks = breaks, plot = FALSE)
+    }
+    
+    fill_col <- if (!is.null(col)) col else "skyblue"
+    t_title  <- if (!is.null(main)) main else paste("Histogram of", x)
+    x_lbl    <- if (!is.null(xlab)) xlab else x
+    y_lbl    <- if (!is.null(ylab)) ylab else "Frequency"
+    y_limit  <- c(0, max(h$counts) + max(1, ceiling(max(h$counts) * 0.15)))
+    
+    hist(vals, breaks = h$breaks, col = fill_col, main = t_title,
+         xlab = x_lbl, ylab = y_lbl, ylim = y_limit, labels = show_labels, ...)
+    if (show_grid) grid()
+    return(invisible(h))
+  }
+  
+  # =========================================================================
+  # 2. FREQUENCY POLYGON
+  # =========================================================================
+  if (type == "freq_poly") {
+    vals <- df[[x]]
+    if (!is.numeric(vals)) stop("Frequency polygon requires numeric 'x'.")
+    
+    h <- if (is.null(breaks)) hist(vals, plot = FALSE) else hist(vals, breaks = breaks, plot = FALSE)
+    
+    line_col <- if (!is.null(col)) col[1] else "royalblue"
+    t_title  <- if (!is.null(main)) main else paste("Frequency Polygon of", x)
+    x_lbl    <- if (!is.null(xlab)) xlab else paste(x, "Class Intervals")
+    y_lbl    <- if (!is.null(ylab)) ylab else "Frequency"
+    
+    plot(h$mids, h$counts, type = "b", pch = 19, lwd = 2,
+         col = line_col, main = t_title, xlab = x_lbl, ylab = y_lbl,
+         ylim = c(0, max(h$counts) + 1), ...)
+    if (show_grid) grid()
+    return(invisible(h))
+  }
+  
+  # =========================================================================
+  # 3. BAR PLOT (Vertical / Horizontal / Grouped)
+  # =========================================================================
+  if (type == "bar") {
+    counts <- table(df[[x]])
+    t_title <- if (!is.null(main)) main else paste("Distribution of", x)
+    
+    if (isTRUE(horiz)) {
+      fill_col <- if (!is.null(col)) col else "steelblue"
+      x_lbl <- if (!is.null(xlab)) xlab else "Count"
+      y_lbl <- if (!is.null(ylab)) ylab else x
+      x_lim <- c(0, max(counts) + max(1, ceiling(max(counts) * 0.15)))
+      
+      bp <- barplot(counts, horiz = TRUE, col = fill_col, main = t_title,
+                    xlab = x_lbl, ylab = y_lbl, xlim = x_lim, las = 1, ...)
+      if (show_labels) text(x = counts, y = bp, label = counts, pos = 4, font = 2)
+    } else {
+      default_cols <- c("skyblue", "orange", "lightgreen", "coral", "plum", "gold")
+      fill_col <- if (!is.null(col)) col else rep(default_cols, length.out = length(counts))
+      x_lbl <- if (!is.null(xlab)) xlab else x
+      y_lbl <- if (!is.null(ylab)) ylab else "Count"
+      y_lim <- c(0, max(counts) + max(1, ceiling(max(counts) * 0.15)))
+      
+      bp <- barplot(counts, horiz = FALSE, col = fill_col, main = t_title,
+                    xlab = x_lbl, ylab = y_lbl, ylim = y_lim, ...)
+      if (show_labels) text(x = bp, y = counts, label = counts, pos = 3, font = 2)
+    }
+    return(invisible(counts))
+  }
+  
+  # =========================================================================
+  # 4. BOX PLOT (Single distribution or Grouped: y ~ x)
+  # =========================================================================
+  if (type == "box") {
+    default_cols <- c("skyblue", "orange", "lightgreen", "coral", "plum", "lightcyan")
+    
+    if (!is.null(y)) {
+      # Grouped boxplot: y (numeric) grouped by x (factor/categorical)
+      fmla <- as.formula(paste(y, "~", x))
+      num_groups <- length(unique(df[[x]]))
+      fill_col <- if (!is.null(col)) col else rep(default_cols, length.out = num_groups)
+      t_title  <- if (!is.null(main)) main else paste("Comparison of", y, "across", x)
+      x_lbl    <- if (!is.null(xlab)) xlab else x
+      y_lbl    <- if (!is.null(ylab)) ylab else y
+      
+      bp <- boxplot(fmla, data = df, col = fill_col, main = t_title,
+                    xlab = x_lbl, ylab = y_lbl, ...)
+      
+      # Print statistical group summary
+      cat("\n--- Group Summary (", y, "by", x, ") ---\n")
+      meds <- tapply(df[[y]], df[[x]], median, na.rm = TRUE)
+      iqrs <- tapply(df[[y]], df[[x]], IQR, na.rm = TRUE)
+      sds  <- tapply(df[[y]], df[[x]], sd, na.rm = TRUE)
+      print(data.frame(Median = meds, IQR = iqrs, SD = round(sds, 2)))
+      
+    } else {
+      # Single numeric distribution
+      fill_col <- if (!is.null(col)) col else "lightcyan"
+      t_title  <- if (!is.null(main)) main else paste("Box Plot of", x)
+      y_lbl    <- if (!is.null(ylab)) ylab else x
+      
+      bp <- boxplot(df[[x]], col = fill_col, border = "darkblue",
+                    main = t_title, ylab = y_lbl, ...)
+    }
+    return(invisible(bp))
+  }
+  
+  # =========================================================================
+  # 5. PIE CHART
+  # =========================================================================
+  if (type == "pie") {
+    counts <- table(df[[x]])
+    pct <- round((counts / sum(counts)) * 100, 1)
+    
+    default_cols <- c("pink", "yellow", "skyblue", "lightgreen", "orange", "plum")
+    fill_col <- if (!is.null(col)) col else rep(default_cols, length.out = length(counts))
+    t_title  <- if (!is.null(main)) main else paste("Distribution of", x)
+    
+    # Combined category and percentage labels
+    labels_pct <- paste0(names(counts), " (", pct, "%)")
+    pie(counts, labels = labels_pct, main = t_title, col = fill_col, ...)
+    return(invisible(counts))
+  }
+  
+  # =========================================================================
+  # 6. LINE PLOT
+  # =========================================================================
+  if (type == "line") {
+    vals <- df[[x]]
+    x_seq <- seq_along(vals)
+    
+    line_col <- if (!is.null(col)) col[1] else "royalblue"
+    t_title  <- if (!is.null(main)) main else paste("Line Plot of", x)
+    x_lbl    <- if (!is.null(xlab)) xlab else "Index"
+    y_lbl    <- if (!is.null(ylab)) ylab else x
+    
+    # If y is provided, treat y as custom x-axis category labels (e.g., Student_ID)
+    if (!is.null(y)) {
+      plot(x_seq, vals, type = "b", pch = 19, lwd = 2, col = line_col,
+           main = t_title, xlab = y, ylab = y_lbl, xaxt = "n", ...)
+      axis(1, at = x_seq, labels = df[[y]], las = 2, cex.axis = 0.8)
+    } else {
+      plot(x_seq, vals, type = "b", pch = 19, lwd = 2, col = line_col,
+           main = t_title, xlab = x_lbl, ylab = y_lbl, ...)
+    }
+    if (show_grid) grid()
+    return(invisible(vals))
+  }
+  
+  # =========================================================================
+  # 7. SCATTER PLOT
+  # =========================================================================
+  if (type == "scatter") {
+    if (is.null(y)) stop("Scatter plot requires both 'x' and 'y'.")
+    
+    x_vals <- df[[x]]
+    y_vals <- df[[y]]
+    t_title <- if (!is.null(main)) main else paste("Scatter Plot:", x, "vs", y)
+    x_lbl   <- if (!is.null(xlab)) xlab else x
+    y_lbl   <- if (!is.null(ylab)) ylab else y
+    
+    # Optional categorical coloring by group
+    if (!is.null(group)) {
+      grp_fact <- as.factor(df[[group]])
+      pal <- if (!is.null(col)) col else c("red", "blue", "darkgreen", "purple", "orange")
+      pt_col <- pal[as.numeric(grp_fact)]
+    } else {
+      pt_col <- if (!is.null(col)) col[1] else "royalblue"
+    }
+    
+    plot(x_vals, y_vals, pch = 19, col = pt_col, cex = 1.3,
+         main = t_title, xlab = x_lbl, ylab = y_lbl, ...)
+    if (show_grid) grid()
+    
+    # Add regression line
+    if (isTRUE(add_reg)) {
+      fit <- lm(y_vals ~ x_vals)
+      abline(fit, col = "black", lwd = 2, lty = 2)
+    }
+    
+    # Add legend if grouping was used
+    if (!is.null(group)) {
+      legend("bottomright", legend = levels(grp_fact),
+             col = pal[1:nlevels(grp_fact)], pch = 19, cex = 0.8, bg = "white")
+    }
+    
+    # Correlation summary
+    corr <- cor(x_vals, y_vals, use = "complete.obs")
+    cat("\n--- Correlation Analysis ---\n")
+    cat("Pearson Correlation (", x, "vs", y, "):", round(corr, 4), "\n")
+    
+    return(invisible(list(correlation = corr, model = if (add_reg) fit else NULL)))
+  }
+}
