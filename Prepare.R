@@ -1070,3 +1070,9 @@ regression_model <- function(scale_train_x,
 
   ))
 }
+
+
+get_mode <- function(v) {
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
