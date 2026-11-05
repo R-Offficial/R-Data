@@ -91,7 +91,7 @@ Additional returned metadata:
 
 ### 2.2 `classification_model()`
 
-Trains a classifier on the prepared matrices and evaluates test performance.
+Trains a classifier on the prepared matrices, evaluates test performance with comprehensive metrics, and automatically renders a 4-panel diagnostic dashboard (`plot = TRUE`).
 
 ```R
 clf <- classification_model(
@@ -99,32 +99,51 @@ clf <- classification_model(
   scale_test_x  = scale_test_x,
   train_y       = train_y,
   test_y        = test_y,
-  model         = "knn",  # Options: "knn", "logistic", "decision_tree", "naive_bayes", "svm", "random_forest"
-  k             = 5       # Number of neighbors (used when model = "knn")
+  model         = "decision_tree", # "knn", "logistic", "decision_tree", "naive_bayes", "svm", "random_forest"
+  k             = 5,               # Number of neighbors (used when model = "knn")
+  plot          = TRUE             # Automatically display 4-panel diagnostic plots
 )
 ```
 
 #### Supported Classification Models:
-- `"knn"`: K-Nearest Neighbors (`class::knn`)
-- `"logistic"`: Multinomial Logistic Regression (`nnet::multinom`)
-- `"decision_tree"`: Decision Tree Classification (`rpart::rpart`)
-- `"naive_bayes"`: Naive Bayes (`e1071::naiveBayes`)
-- `"svm"`: Support Vector Machine with Radial Kernel (`e1071::svm`)
-- `"random_forest"`: Random Forest (`randomForest::randomForest`)
+- `"knn"`: K-Nearest Neighbors (`class::knn`) with winning vote confidence analysis.
+- `"logistic"`: Multinomial Logistic Regression (`nnet::multinom`) with probability curves.
+- `"decision_tree"`: Decision Tree Classification (`rpart::rpart`) with tree visualization.
+- `"naive_bayes"`: Naive Bayes (`e1071::naiveBayes`) with class-conditional distributions.
+- `"svm"`: Support Vector Machine with Radial Kernel (`e1071::svm`) with decision boundaries and support vectors.
+- `"random_forest"`: Random Forest (`randomForest::randomForest`) with variable importance and tree diagnostics.
+
+#### Diagnostic Visualizations Generated (`plot = TRUE`):
+1. **Actual vs Predicted Curve**: Sequential test observations sorted by true class, highlighting matches and marking misclassifications with prominent red indicators.
+2. **Confusion Matrix Heatmap**: Full color-graded tile heatmap displaying cell frequencies and exact percentages.
+3. **Probability Curve / Class Performance**: S-curve of predicted probabilities (binary) or grouped bar chart of Precision, Recall, and F1-score per class.
+4. **Model-Specific Visualization**:
+   - `decision_tree`: Draws the full tree diagram with splits, questions, and leaf classifications.
+   - `random_forest`: Top feature importance barplot (Mean Decrease Gini).
+   - `svm`: Decision boundary slice plot with highlighted support vectors.
+   - `logistic`: Top coefficient weights / odds ratios barplot.
+   - `naive_bayes`: Class prior / distribution barplot.
+   - `knn`: Vote confidence histogram.
 
 **Returns:**
 - `clf$model`: The trained model object.
 - `clf$predictions`: Factor vector of test set predictions.
+- `clf$probabilities`: Matrix or vector of predicted class probabilities.
 - `clf$confusion_matrix`: Confusion matrix table.
-- `clf$class_metrics`: Precision, Recall, and F1-Score per class.
-- `clf$overall_metrics`: Accuracy, Macro averages, and Weighted averages.
+- `clf$class_metrics`: Precision, Recall, Specificity, F1-Score, and Support per class.
+- `clf$overall_metrics`: Accuracy, Balanced Accuracy, Cohen's Kappa, Macro averages, Weighted averages, and ROC AUC (for binary).
 - `clf$accuracy`: Overall accuracy score.
+- `clf$balanced_accuracy`: Balanced accuracy score.
+- `clf$kappa`: Cohen's Kappa score.
+- `clf$macro_f1`: Macro-averaged F1 score.
+- `clf$tree_table`: Tree #1 rule table (for Random Forest).
+- `clf$support_vectors`: Total count and per-class breakdown of Support Vectors (for SVM).
 
 ---
 
 ### 2.3 `regression_model()`
 
-Trains a regression model and calculates standard performance metrics ($MAE$, $MSE$, $RMSE$, $R^2$, Adjusted $R^2$, and $MAPE$).
+Trains a regression model, calculates standard and advanced performance metrics ($MAE$, $MSE$, $RMSE$, $R^2$, Adjusted $R^2$, $MAPE$, Pearson $r$, $NRMSE$, and Explained Variance), and generates a 4-panel diagnostic dashboard (`plot = TRUE`).
 
 ```R
 reg <- regression_model(
@@ -132,10 +151,11 @@ reg <- regression_model(
   scale_test_x  = scale_test_x,
   train_y       = train_y,
   test_y        = test_y,
-  model         = "multiple_linear", # Options: "linear", "multiple_linear", "polynomial", "lasso", "ridge", "elastic_net", "decision_tree", "random_forest", "svm"
-  degree        = 2,                 # Degree for "polynomial"
-  alpha         = 0.5,               # Mixing parameter for "elastic_net" (0 = ridge, 1 = lasso)
-  k             = 5                  # Cross-validation folds for regularized models
+  model         = "decision_tree", # "linear", "multiple_linear", "polynomial", "lasso", "ridge", "elastic_net", "decision_tree", "random_forest", "svm"
+  degree        = 2,               # Degree for "polynomial"
+  alpha         = 0.5,             # Mixing parameter for "elastic_net" (0 = ridge, 1 = lasso)
+  k             = 5,               # Cross-validation folds for regularized models
+  plot          = TRUE             # Automatically display 4-panel diagnostic plots
 )
 ```
 
@@ -146,21 +166,58 @@ reg <- regression_model(
 - `"lasso"`: L1 Regularization (`glmnet::cv.glmnet` with $\alpha = 1$).
 - `"ridge"`: L2 Regularization (`glmnet::cv.glmnet` with $\alpha = 0$).
 - `"elastic_net"`: Elastic Net Regularization (`glmnet::cv.glmnet` with user-defined $\alpha$).
-- `"decision_tree"`: Regression Tree (`rpart::rpart`).
-- `"random_forest"`: Random Forest Regressor (`randomForest::randomForest`).
-- `"svm"`: Support Vector Regressor (`e1071::svm`).
+- `"decision_tree"`: Regression Tree (`rpart::rpart`) with tree visualization.
+- `"random_forest"`: Random Forest Regressor (`randomForest::randomForest`) with feature importance.
+- `"svm"`: Support Vector Regressor (`e1071::svm`) with support vectors and error margin tube.
+
+#### Diagnostic Visualizations Generated (`plot = TRUE`):
+1. **Predict and Actual Curve**: Test observations sorted by actual value, showing the smooth blue Actual curve, dashed red Predicted curve, and connecting dotted residual lines.
+2. **Actual vs Predicted Scatter Plot**: Ground truth vs predictions with ideal $y = x$ reference line and linear trend line.
+3. **Residuals vs Predicted Plot**: Prediction residuals against predicted values with horizontal zero-error line and error bounds.
+4. **Model-Specific Visualization**:
+   - `decision_tree`: Draws the full regression tree diagram with split criteria and node values.
+   - `random_forest`: Top feature importance barplot (%IncMSE or IncNodePurity).
+   - `svm`: Residuals plot highlighting Support Vectors and $\pm \epsilon$ margin band.
+   - `lasso`, `ridge`, `elastic_net`: Cross-validation MSE curve vs $\log(\lambda)$.
+   - `linear`, `multiple_linear`, `polynomial`: Residuals Normal Q-Q plot.
 
 **Returns:**
 - `reg$model`: The trained model object.
 - `reg$predictions`: Predicted continuous values.
-- `reg$actual`: Ground truth values.
+- `reg$actual`: Ground truth test values.
 - `reg$residuals`: Errors ($Actual - Predicted$).
-- `reg$prediction_table`: `data.frame` of actuals, predictions, and residuals.
-- `reg$metrics`: Summary table of MAE, MSE, RMSE, $R^2$, Adjusted $R^2$, and MAPE.
+- `reg$prediction_table`: `data.frame` of actuals, predictions, residuals, and percentage errors.
+- `reg$metrics`: Summary table of MAE, MSE, RMSE, $R^2$, Adjusted $R^2$, MAPE, Pearson $r$, NRMSE, Explained Variance, Max Error, AIC, and BIC.
+- `reg$MAE`, `reg$MSE`, `reg$RMSE`, `reg$R2`, `reg$adjusted_R2`, `reg$MAPE`, `reg$pearson_r`, `reg$nrmse`: Direct metric values.
+- `reg$tree_table`: Tree #1 rule table (for Random Forest).
+- `reg$support_vectors`: Total count and indices of Support Vectors (for SVM).
 
 ---
 
-### 2.4 `probability_distribution()`
+### 2.4 Standalone Machine Learning Visualization Functions
+
+You can also call the dedicated plotting helpers directly at any time:
+
+```R
+# 1. Draw Predict vs Actual Curve (Classification or Regression)
+draw_predict_actual(actual = test_y, predicted = predictions, model_name = "Model")
+
+# 2. Draw Decision Tree
+draw_decision_tree(model = clf$model, title = "Classification Tree")
+
+# 3. Draw Random Forest Diagnostics (Error vs Trees & Feature Importance)
+draw_random_forest(model = clf$model, title = "Random Forest", standalone = TRUE)
+
+# 4. Draw SVM Decision Boundary & Support Vectors
+draw_svm(model = clf$model, data = train_df, title = "SVM Decision Boundary")
+
+# 5. Draw Confusion Matrix Heatmap
+draw_confusion_matrix(cm = clf$confusion_matrix, title = "Confusion Matrix Heatmap")
+```
+
+---
+
+### 2.5 `probability_distribution()`
 
 A unified function for computing and visualizing probability distributions — Binomial, Poisson, Normal, and Geometric.
 
@@ -204,7 +261,7 @@ probability_distribution(
 
 ---
 
-### 2.5 `clustering_analysis()`
+### 2.6 `clustering_analysis()`
 
 Performs end-to-end unsupervised clustering analysis: data exploration, correlation, PCA, K-Means, Hierarchical Clustering, and statistical tests — all in a single function call.
 
@@ -265,7 +322,7 @@ result <- clustering_analysis(
 
 ---
 
-### 2.6 `generate_plot()`
+### 2.7 `generate_plot()`
 
 A unified plotting function supporting 7 key chart types: histograms, frequency polygons, bar charts, box plots, pie charts, line plots, and scatter plots.
 

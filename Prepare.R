@@ -348,12 +348,389 @@ prepare_data <- function(data,
 
 
 
+# ==============================================================================
+# MACHINE LEARNING VISUALIZATION HELPERS
+# ==============================================================================
+
+#' Draw Confusion Matrix Heatmap
+#'
+#' Plots a formatted, color-graded confusion matrix heatmap with cell counts,
+#' cell percentages, and highlighted diagonal.
+#'
+#' @param cm Table or matrix: Confusion matrix (Actual vs Predicted)
+#' @param title Character: Title for the heatmap
+#' @export
+draw_confusion_matrix <- function(cm, title = "Confusion Matrix Heatmap") {
+  if (!is.matrix(cm) && !is.table(cm)) {
+    stop("cm must be a matrix or table.")
+  }
+  cm <- as.matrix(cm)
+  n_classes <- nrow(cm)
+  classes <- rownames(cm)
+  col_names <- colnames(cm)
+  if (is.null(col_names)) col_names <- classes
+
+  # Calculate proportions relative to max cell count for color shading
+  max_val <- max(1, max(cm))
+  cm_norm <- cm / max_val
+
+  # 100-shade sequential blue palette
+  pal <- colorRampPalette(c("#f7fbff", "#deebf7", "#9ecae1", "#4292c6", "#08519c"))(100)
+
+  # Setup plot area
+  image(
+    x = seq_len(ncol(cm)),
+    y = seq_len(nrow(cm)),
+    z = t(cm[nrow(cm):1, , drop = FALSE]),
+    col = pal,
+    axes = FALSE,
+    xlab = "Predicted Class",
+    ylab = "Actual Class",
+    main = title
+  )
+
+  axis(1, at = seq_len(ncol(cm)), labels = col_names, font = 2, tick = FALSE)
+  axis(2, at = seq_len(nrow(cm)), labels = rev(classes), font = 2, las = 1, tick = FALSE)
+
+  total_n <- sum(cm)
+  for (i in seq_len(ncol(cm))) {
+    for (j in seq_len(nrow(cm))) {
+      cnt <- cm[j, i]
+      pct <- if (total_n > 0) round(cnt / total_n * 100, 1) else 0
+      val_norm <- cm_norm[j, i]
+      txt_col <- if (val_norm > 0.55) "white" else "#1a252f"
+      font_type <- if (j == i) 2 else 1
+      text(
+        x = i,
+        y = nrow(cm) - j + 1,
+        labels = paste0(cnt, "\n(", pct, "%)"),
+        col = txt_col,
+        font = font_type,
+        cex = max(0.7, min(1.1, 12 / max(10, n_classes)))
+      )
+    }
+  }
+  box(col = "gray60")
+}
+
+
+#' Draw Predict vs Actual Curve
+#'
+#' Plots the Actual vs Predicted curve for classification (categorical labels)
+#' or regression (continuous response values). For classification, test samples
+#' are sorted by actual class and mismatches are prominently highlighted with
+#' red crosses and vertical error links. For regression, test samples are sorted
+#' by actual value, showing the smooth actual response curve against the model
+#' predictions, with dotted residual lines connecting them.
+#'
+#' @param actual Numeric vector or factor: Ground truth target values
+#' @param predicted Numeric vector or factor: Model predictions
+#' @param model_name Character: Optional name of the model for titles
+#' @param title Character: Custom title (optional)
+#' @export
+draw_predict_actual <- function(actual,
+                                predicted,
+                                model_name = "Model",
+                                title = NULL) {
+  n <- length(actual)
+  if (n < 1) stop("actual vector must not be empty.")
+  if (n != length(predicted)) stop("actual and predicted lengths must match.")
+
+  is_cat <- is.factor(actual) || is.character(actual)
+
+  if (is_cat) {
+    # ----------------------------------------------------
+    # CLASSIFICATION: Actual vs Predicted Curve
+    # ----------------------------------------------------
+    classes <- if (is.factor(actual)) levels(actual) else unique(c(actual, predicted))
+    act_fac <- factor(actual, levels = classes)
+    pred_fac <- factor(predicted, levels = classes)
+
+    ord <- order(act_fac)
+    act_ord <- act_fac[ord]
+    pred_ord <- pred_fac[ord]
+
+    act_num <- as.numeric(act_ord)
+    pred_num <- as.numeric(pred_ord)
+    matches <- (act_ord == pred_ord)
+    acc <- sum(matches) / n
+    err_count <- sum(!matches)
+
+    t_main <- if (!is.null(title)) title else paste0(toupper(model_name), ": Actual vs Predicted Sequence")
+    t_sub <- paste0("Accuracy: ", round(acc * 100, 2), "% | Misclassifications: ", err_count, "/", n)
+
+    plot(
+      seq_len(n),
+      act_num,
+      type = "b",
+      pch = 16,
+      col = "#1f77b4",
+      lwd = 2,
+      yaxt = "n",
+      ylim = c(0.7, length(classes) + 0.35),
+      xlab = "Test Observations (Sorted by Actual Class)",
+      ylab = "Class Label",
+      main = t_main,
+      sub = t_sub,
+      cex.sub = 0.85
+    )
+    axis(2, at = seq_along(classes), labels = classes, las = 1, font = 2)
+    lines(seq_len(n), pred_num, type = "b", pch = 17, col = "#e6550d", lwd = 2, lty = 2)
+
+    # Highlight misclassified observations with red crosses and links
+    if (err_count > 0) {
+      err_idx <- which(!matches)
+      segments(err_idx, act_num[err_idx], err_idx, pred_num[err_idx], col = "#de2d26", lwd = 2, lty = 1)
+      points(err_idx, pred_num[err_idx], pch = 4, col = "#de2d26", cex = 1.6, lwd = 3)
+    }
+
+    legend(
+      "topleft",
+      legend = c("Actual Class", "Predicted Class", paste0("Errors (", err_count, ")")),
+      col = c("#1f77b4", "#e6550d", "#de2d26"),
+      pch = c(16, 17, 4),
+      lty = c(1, 2, 1),
+      lwd = 2,
+      bty = "o",
+      bg = "white",
+      cex = 0.8
+    )
+  } else {
+    # ----------------------------------------------------
+    # REGRESSION: Actual vs Predicted Curve
+    # ----------------------------------------------------
+    act_num <- as.numeric(actual)
+    pred_num <- as.numeric(predicted)
+
+    ord <- order(act_num)
+    act_ord <- act_num[ord]
+    pred_ord <- pred_num[ord]
+
+    resids <- act_num - pred_num
+    RMSE <- sqrt(mean(resids^2))
+    MAE <- mean(abs(resids))
+    SST <- sum((act_num - mean(act_num))^2)
+    R2 <- if (SST > 0) 1 - sum(resids^2) / SST else NA_real_
+
+    y_lim <- range(c(act_ord, pred_ord), na.rm = TRUE)
+    pad <- diff(y_lim) * 0.1
+    if (pad == 0) pad <- 1
+    y_lim <- c(y_lim[1] - pad, y_lim[2] + pad)
+
+    t_main <- if (!is.null(title)) title else paste0(toupper(model_name), ": Actual vs Predicted Curve")
+    t_sub <- paste0("RMSE: ", round(RMSE, 3), " | MAE: ", round(MAE, 3), " | R²: ", ifelse(is.na(R2), "N/A", round(R2, 3)))
+
+    plot(
+      seq_len(n),
+      act_ord,
+      type = "b",
+      pch = 16,
+      col = "#1f77b4",
+      lwd = 2,
+      ylim = y_lim,
+      xlab = "Test Observations (Sorted by Actual Value)",
+      ylab = "Target Value",
+      main = t_main,
+      sub = t_sub,
+      cex.sub = 0.85
+    )
+    lines(seq_len(n), pred_ord, type = "b", pch = 17, col = "#e6550d", lwd = 2, lty = 2)
+    segments(seq_len(n), act_ord, seq_len(n), pred_ord, col = rgb(0.5, 0.5, 0.5, 0.5), lty = 3)
+
+    legend(
+      "topleft",
+      legend = c("Actual Curve", "Predicted Curve"),
+      col = c("#1f77b4", "#e6550d"),
+      pch = c(16, 17),
+      lty = c(1, 2),
+      lwd = 2,
+      bty = "o",
+      bg = "white",
+      cex = 0.8
+    )
+  }
+}
+
+
+#' Draw Decision Tree
+#'
+#' Draws an rpart decision tree with node decisions, branch criteria,
+#' and terminal values. Automatically utilizes `rpart.plot` if installed,
+#' and cleanly falls back to standard `plot.rpart` and `text.rpart`.
+#'
+#' @param model An rpart model object
+#' @param title Character: Title for the tree plot
+#' @export
+draw_decision_tree <- function(model, title = "Decision Tree") {
+  if (!inherits(model, "rpart")) {
+    stop("model must be an rpart object.")
+  }
+
+  if (nrow(model$frame) <= 1) {
+    plot.new()
+    text(0.5, 0.5, "Single Node Tree\n(No splits found)", cex = 1.1, font = 2)
+    title(main = title)
+    return(invisible(NULL))
+  }
+
+  if (requireNamespace("rpart.plot", quietly = TRUE)) {
+    extra_code <- if (model$method == "class") 104 else 101
+    rpart.plot::rpart.plot(
+      model,
+      main = title,
+      type = 2,
+      extra = extra_code,
+      fallen.leaves = TRUE,
+      shadow.col = "gray85"
+    )
+  } else {
+    plot(
+      model,
+      uniform = TRUE,
+      branch = 0.5,
+      margin = 0.12,
+      main = title
+    )
+    text(
+      model,
+      use.n = TRUE,
+      all = TRUE,
+      cex = 0.82,
+      xpd = TRUE,
+      col = "#08306b"
+    )
+  }
+}
+
+
+#' Draw Random Forest Diagnostics
+#'
+#' Plots Random Forest convergence (Error / MSE vs Number of Trees) and
+#' Variable Importance.
+#'
+#' @param model A randomForest model object
+#' @param title Character: Title prefix
+#' @param standalone Logical: If TRUE, configures a 1x2 panel layout
+#' @export
+draw_random_forest <- function(model, title = "Random Forest", standalone = FALSE) {
+  if (!inherits(model, "randomForest")) {
+    stop("model must be a randomForest object.")
+  }
+
+  if (standalone) {
+    old_par <- par(no.readonly = TRUE)
+    on.exit(par(old_par))
+    par(mfrow = c(1, 2), mar = c(4.5, 4.5, 3.5, 1.5))
+  }
+
+  imp <- model$importance
+  is_class <- model$type == "classification"
+
+  # Panel 1: Error vs Trees (if standalone)
+  if (standalone) {
+    if (is_class && !is.null(model$err.rate)) {
+      plot(model, main = paste0(title, ": Error vs Trees"))
+      classes <- colnames(model$err.rate)
+      n_c <- min(length(classes), 6)
+      legend("topright", legend = classes[1:n_c], col = 1:n_c, lty = 1:n_c, cex = 0.75, bg = "white")
+    } else if (!is.null(model$mse)) {
+      plot(model, main = paste0(title, ": MSE vs Trees"), col = "#238b45", lwd = 2)
+    }
+  }
+
+  # Variable Importance Barplot
+  if (!is.null(imp) && nrow(imp) > 0) {
+    imp_col <- if (is_class) {
+      if ("MeanDecreaseGini" %in% colnames(imp)) imp[, "MeanDecreaseGini"] else imp[, 1]
+    } else {
+      if ("%IncMSE" %in% colnames(imp)) imp[, "%IncMSE"] else imp[, 1]
+    }
+    col_label <- if (is_class) "Mean Decrease Gini" else "% Increase MSE"
+    sorted_imp <- sort(imp_col, decreasing = FALSE)
+    n_show <- min(10, length(sorted_imp))
+    top_imp <- tail(sorted_imp, n_show)
+
+    barplot(
+      top_imp,
+      horiz = TRUE,
+      las = 1,
+      col = "#3182bd",
+      border = "#08519c",
+      xlab = col_label,
+      main = paste0(title, ": Top Feature Importance"),
+      cex.names = 0.8
+    )
+    box(col = "gray60")
+  }
+}
+
+
+#' Draw SVM Diagnostics
+#'
+#' Draws SVM classification decision boundaries and slices with highlighted
+#' support vectors, or SVM regression actual vs predicted error tube.
+#'
+#' @param model An svm model object from e1071
+#' @param data Data frame containing features and target
+#' @param title Character: Title
+#' @export
+draw_svm <- function(model, data = NULL, title = "SVM Model Diagnostics") {
+  if (!inherits(model, "svm")) {
+    stop("model must be an svm object.")
+  }
+
+  is_class <- model$type %in% c(0, 1) || (!is.null(model$nSV))
+
+  if (!is.null(data) && is.data.frame(data)) {
+    feat_cols <- setdiff(names(data), c("target", "mpg", "Species"))
+    num_feats <- feat_cols[sapply(data[, feat_cols, drop = FALSE], is.numeric)]
+
+    if (length(num_feats) >= 2) {
+      feat_vars <- apply(data[, num_feats, drop = FALSE], 2, var)
+      top2 <- names(sort(feat_vars, decreasing = TRUE))[1:2]
+      fmla <- as.formula(paste0(top2[2], " ~ ", top2[1]))
+      res <- tryCatch({
+        plot(
+          model,
+          data = data,
+          fmla,
+          main = paste0(title, " (", top2[1], " vs ", top2[2], ")")
+        )
+        TRUE
+      }, error = function(e) FALSE)
+      if (res) return(invisible(NULL))
+    }
+  }
+
+  # Fallback visualization: Support Vector Breakdown
+  if (is_class && !is.null(model$nSV)) {
+    classes <- model$levels
+    if (is.null(classes)) classes <- paste0("Class ", seq_along(model$nSV))
+    bp <- barplot(
+      model$nSV,
+      names.arg = classes,
+      col = "#6baed6",
+      border = "#2171b5",
+      ylab = "Support Vector Count",
+      main = paste0(title, " (Total SVs: ", sum(model$nSV), ")")
+    )
+    text(bp, model$nSV / 2, labels = model$nSV, font = 2)
+  } else {
+    plot.new()
+    text(0.5, 0.5, paste0("SVM Support Vectors: ", model$tot.nSV), cex = 1.2, font = 2)
+    title(main = title)
+  }
+}
+
+
+
 classification_model <- function(scale_train_x,
                                  scale_test_x,
                                  train_y,
                                  test_y,
                                  model = "knn",
-                                 k = 5) {
+                                 k = 5,
+                                 plot = TRUE) {
 
   # ==========================================
   # 1. VALIDATE INPUTS
@@ -422,7 +799,17 @@ classification_model <- function(scale_train_x,
     stop("Infinite or non-finite feature values found.")
   }
 
-  # Convert to data frames for formula-based models
+  # Preserve clean, valid feature names for formula-based models and plots
+  raw_cols <- colnames(scale_train_x)
+  if (is.null(raw_cols) || any(raw_cols == "")) {
+    feature_names <- paste0("X", seq_len(ncol(train_x)))
+  } else {
+    feature_names <- make.names(raw_cols, unique = TRUE)
+  }
+
+  colnames(train_x) <- feature_names
+  colnames(test_x) <- feature_names
+
   train_df <- data.frame(
     train_x,
     check.names = FALSE
@@ -443,23 +830,29 @@ classification_model <- function(scale_train_x,
   cat("MODEL:", toupper(model), "\n")
   cat("====================================\n")
 
+  probabilities <- NULL
+  tree_table <- NULL
+  support_vectors_info <- NULL
+
   if (model == "knn") {
 
-    # K-Nearest Neighbors
-
-    fitted_model <- NULL
-
-    predictions <- class::knn(
+    # K-Nearest Neighbors with probability attributes
+    knn_res <- class::knn(
       train = train_x,
       test = test_x,
       cl = train_y,
-      k = k
+      k = k,
+      prob = TRUE
     )
+
+    fitted_model <- NULL
+    predictions <- knn_res
+    prob_winning <- attr(knn_res, "prob")
+    probabilities <- prob_winning
 
   } else if (model == "logistic") {
 
     # Multinomial Logistic Regression
-
     fitted_model <- nnet::multinom(
       target ~ .,
       data = train_df,
@@ -472,10 +865,25 @@ classification_model <- function(scale_train_x,
       type = "class"
     )
 
+    prob_raw <- predict(
+      fitted_model,
+      newdata = test_df,
+      type = "probs"
+    )
+
+    if (length(classes) == 2 && is.numeric(prob_raw) && is.null(dim(prob_raw))) {
+      probabilities <- matrix(
+        c(1 - prob_raw, prob_raw),
+        ncol = 2,
+        dimnames = list(NULL, classes)
+      )
+    } else {
+      probabilities <- as.matrix(prob_raw)
+    }
+
   } else if (model == "decision_tree") {
 
     # Decision Tree
-
     fitted_model <- rpart::rpart(
       target ~ .,
       data = train_df,
@@ -488,10 +896,15 @@ classification_model <- function(scale_train_x,
       type = "class"
     )
 
+    probabilities <- predict(
+      fitted_model,
+      newdata = test_df,
+      type = "prob"
+    )
+
   } else if (model == "naive_bayes") {
 
     # Naive Bayes
-
     fitted_model <- e1071::naiveBayes(
       target ~ .,
       data = train_df
@@ -503,26 +916,47 @@ classification_model <- function(scale_train_x,
       type = "class"
     )
 
+    probabilities <- predict(
+      fitted_model,
+      newdata = test_df,
+      type = "raw"
+    )
+
   } else if (model == "svm") {
 
-    # Support Vector Machine
-
+    # Support Vector Machine (with probability enabled)
     fitted_model <- e1071::svm(
       target ~ .,
       data = train_df,
       kernel = "radial",
-      scale = FALSE
+      scale = FALSE,
+      probability = TRUE
     )
 
-    predictions <- predict(
+    pred_svm <- predict(
       fitted_model,
-      newdata = test_df
+      newdata = test_df,
+      probability = TRUE
+    )
+
+    predictions <- pred_svm
+    probabilities <- attr(pred_svm, "probabilities")
+    if (!is.null(probabilities)) {
+      # Align columns with classes
+      matched_cols <- intersect(classes, colnames(probabilities))
+      if (length(matched_cols) == length(classes)) {
+        probabilities <- probabilities[, classes, drop = FALSE]
+      }
+    }
+
+    support_vectors_info <- list(
+      total_sv = fitted_model$tot.nSV,
+      n_sv_per_class = fitted_model$nSV
     )
 
   } else if (model == "random_forest") {
 
     # Random Forest
-
     fitted_model <- randomForest::randomForest(
       target ~ .,
       data = train_df,
@@ -532,7 +966,20 @@ classification_model <- function(scale_train_x,
 
     predictions <- predict(
       fitted_model,
-      newdata = test_df
+      newdata = test_df,
+      type = "response"
+    )
+
+    probabilities <- predict(
+      fitted_model,
+      newdata = test_df,
+      type = "prob"
+    )
+
+    # Extract tree #1 summary table
+    tree_table <- tryCatch(
+      randomForest::getTree(fitted_model, k = 1, labelVar = TRUE),
+      error = function(e) NULL
     )
   }
 
@@ -555,17 +1002,16 @@ classification_model <- function(scale_train_x,
   )
 
   cat("\n========== CONFUSION MATRIX ==========\n")
-
   print(cm)
 
   # ==========================================
-  # 5. CALCULATE METRICS
+  # 5. CALCULATE ENRICHED METRICS
   # ==========================================
 
   TP <- diag(cm)
-
   actual_total <- rowSums(cm)
   predicted_total <- colSums(cm)
+  total_samples <- sum(cm)
 
   precision <- ifelse(
     predicted_total > 0,
@@ -581,22 +1027,37 @@ classification_model <- function(scale_train_x,
 
   f1 <- ifelse(
     precision + recall > 0,
-    2 * precision * recall /
-      (precision + recall),
+    2 * precision * recall / (precision + recall),
     0
   )
 
-  # Class-wise metrics
+  # Per-class Specificity: TN / (TN + FP)
+  specificity <- numeric(length(classes))
+  for (i in seq_along(classes)) {
+    tn <- total_samples - (actual_total[i] + predicted_total[i] - TP[i])
+    fp <- predicted_total[i] - TP[i]
+    specificity[i] <- if (tn + fp > 0) tn / (tn + fp) else 0
+  }
+
+  # Class-wise metrics table
   class_metrics <- data.frame(
     Class = rownames(cm),
     Precision = as.numeric(precision),
     Recall = as.numeric(recall),
+    Specificity = as.numeric(specificity),
     F1_Score = as.numeric(f1),
     Support = as.numeric(actual_total)
   )
 
   # Overall accuracy
-  accuracy <- sum(TP) / sum(cm)
+  accuracy <- sum(TP) / total_samples
+
+  # Balanced Accuracy: mean of class recalls
+  balanced_accuracy <- mean(recall)
+
+  # Cohen's Kappa: (P_o - P_e) / (1 - P_e)
+  pe <- sum(actual_total * predicted_total) / (total_samples^2)
+  kappa <- if (pe < 1) (accuracy - pe) / (1 - pe) else 0
 
   # Macro averages
   macro_precision <- mean(precision)
@@ -604,18 +1065,32 @@ classification_model <- function(scale_train_x,
   macro_f1 <- mean(f1)
 
   # Weighted averages
-  weighted_precision <- sum(precision * actual_total) /
-    sum(actual_total)
+  weighted_precision <- sum(precision * actual_total) / sum(actual_total)
+  weighted_recall <- sum(recall * actual_total) / sum(actual_total)
+  weighted_f1 <- sum(f1 * actual_total) / sum(actual_total)
 
-  weighted_recall <- sum(recall * actual_total) /
-    sum(actual_total)
-
-  weighted_f1 <- sum(f1 * actual_total) /
-    sum(actual_total)
+  # Binary AUC calculation (rank-sum formula)
+  auc_score <- NA_real_
+  if (length(classes) == 2 && !is.null(probabilities) && is.matrix(probabilities)) {
+    pos_class <- classes[2]
+    if (pos_class %in% colnames(probabilities)) {
+      y_bin <- as.integer(test_y == pos_class)
+      n1 <- sum(y_bin == 1)
+      n0 <- sum(y_bin == 0)
+      if (n1 > 0 && n0 > 0) {
+        ranks <- rank(probabilities[, pos_class])
+        r1 <- sum(ranks[y_bin == 1])
+        u <- r1 - (n1 * (n1 + 1)) / 2
+        auc_score <- u / (n1 * n0)
+      }
+    }
+  }
 
   overall_metrics <- data.frame(
     Metric = c(
       "Accuracy",
+      "Balanced Accuracy",
+      "Cohen's Kappa",
       "Macro Precision",
       "Macro Recall",
       "Macro F1 Score",
@@ -623,9 +1098,10 @@ classification_model <- function(scale_train_x,
       "Weighted Recall",
       "Weighted F1 Score"
     ),
-
     Score = c(
       accuracy,
+      balanced_accuracy,
+      kappa,
       macro_precision,
       macro_recall,
       macro_f1,
@@ -635,43 +1111,137 @@ classification_model <- function(scale_train_x,
     )
   )
 
+  if (!is.na(auc_score)) {
+    overall_metrics <- rbind(
+      overall_metrics,
+      data.frame(Metric = "ROC AUC", Score = auc_score)
+    )
+  }
+
   # ==========================================
   # 6. DISPLAY RESULTS
   # ==========================================
 
   cat("\n========== CLASS-WISE METRICS ==========\n")
-
-  print(class_metrics, row.names = FALSE)
+  print(round(class_metrics[, 2:6], 4), row.names = class_metrics$Class)
 
   cat("\n========== OVERALL METRICS ==========\n")
-
   print(overall_metrics, row.names = FALSE)
 
   cat("\n========== MODEL SUMMARY ==========\n")
-
   cat("Model:", model, "\n")
   cat("Accuracy:", round(accuracy * 100, 2), "%\n")
-
+  cat("Balanced Accuracy:", round(balanced_accuracy * 100, 2), "%\n")
+  cat("Cohen's Kappa:", round(kappa, 4), "\n")
   cat("Macro F1 Score:", round(macro_f1, 4), "\n")
+  if (!is.na(auc_score)) {
+    cat("ROC AUC:", round(auc_score, 4), "\n")
+  }
 
   # ==========================================
-  # 7. RETURN EVERYTHING
+  # 7. VISUALIZATIONS
+  # ==========================================
+
+  if (plot) {
+    old_par <- par(no.readonly = TRUE)
+    on.exit(par(old_par))
+    par(mfrow = c(2, 2), mar = c(4.2, 4.2, 3.2, 1.2))
+
+    # Panel 1: Predict and Actual Curve
+    draw_predict_actual(test_y, predictions, model_name = model)
+
+    # Panel 2: Confusion Matrix Heatmap
+    draw_confusion_matrix(cm, title = paste0(toupper(model), ": Confusion Matrix"))
+
+    # Panel 3: Probability Distribution / Class Metrics
+    if (!is.null(probabilities) && is.matrix(probabilities) && length(classes) == 2) {
+      # Binary S-curve / ranked probability curve
+      pos_col <- classes[2]
+      pos_probs <- probabilities[, pos_col]
+      ord_p <- order(pos_probs)
+      plot(
+        seq_along(ord_p),
+        pos_probs[ord_p],
+        type = "l",
+        col = "#08519c",
+        lwd = 2.5,
+        ylim = c(0, 1),
+        xlab = "Test Observations (Ranked by P)",
+        ylab = paste0("Predicted P(", pos_col, ")"),
+        main = "Predicted Probability Curve"
+      )
+      abline(h = 0.5, lty = 2, col = "gray50")
+      pt_cols <- ifelse(test_y[ord_p] == pos_col, "#238b45", "#de2d26")
+      points(seq_along(ord_p), as.numeric(test_y[ord_p] == pos_col), pch = 16, col = pt_cols, cex = 1.2)
+      legend("topleft", legend = c("P-Curve", paste("True", pos_col), "True Other", "Cutoff 0.5"),
+             col = c("#08519c", "#238b45", "#de2d26", "gray50"), lty = c(1, NA, NA, 2),
+             pch = c(NA, 16, 16, NA), lwd = 2, cex = 0.75, bg = "white")
+    } else {
+      # Grouped barplot of class performance
+      perf_mat <- rbind(class_metrics$Precision, class_metrics$Recall, class_metrics$F1_Score)
+      colnames(perf_mat) <- classes
+      rownames(perf_mat) <- c("Precision", "Recall", "F1")
+      barplot(
+        perf_mat,
+        beside = TRUE,
+        col = c("#6baed6", "#3182bd", "#08519c"),
+        ylim = c(0, 1.15),
+        ylab = "Score",
+        main = "Class-wise Performance"
+      )
+      legend("topright", legend = c("Precision", "Recall", "F1"),
+             fill = c("#6baed6", "#3182bd", "#08519c"), cex = 0.75, bg = "white")
+      box(col = "gray60")
+    }
+
+    # Panel 4: Model-Specific Visualization
+    if (model == "decision_tree") {
+      draw_decision_tree(fitted_model, title = "Decision Tree (Classification)")
+    } else if (model == "random_forest") {
+      draw_random_forest(fitted_model, title = "Random Forest (Classification)")
+    } else if (model == "svm") {
+      draw_svm(fitted_model, data = train_df, title = "SVM Decision Boundary")
+    } else if (model == "logistic") {
+      # Odds ratio / coefficient plot
+      coefs <- coef(fitted_model)
+      if (is.matrix(coefs)) coef_vals <- coefs[1, -1] else coef_vals <- coefs[-1]
+      coef_vals <- sort(coef_vals, decreasing = FALSE)
+      n_show <- min(10, length(coef_vals))
+      top_c <- tail(coef_vals, n_show)
+      barplot(top_c, horiz = TRUE, las = 1, col = "#74a9cf",
+              main = "Top Logistic Coefficients", xlab = "Coefficient Value", cex.names = 0.8)
+      box(col = "gray60")
+    } else if (model == "naive_bayes") {
+      # Class prior barplot
+      barplot(fitted_model$apriori, col = "#9ecae1", las = 1,
+              main = "Naive Bayes: Class Distribution", ylab = "Count")
+      box(col = "gray60")
+    } else if (model == "knn") {
+      # KNN winning vote proportion distribution
+      hist(as.numeric(prob_winning), col = "#c6dbef", border = "#2171b5",
+           xlab = "Winning Vote Ratio", main = paste0("KNN (k=", k, ") Vote Confidence"))
+      box(col = "gray60")
+    }
+  }
+
+  # ==========================================
+  # 8. RETURN EVERYTHING
   # ==========================================
 
   return(list(
-
     model = fitted_model,
-
     predictions = predictions,
-
+    probabilities = probabilities,
     confusion_matrix = cm,
-
     class_metrics = class_metrics,
-
     overall_metrics = overall_metrics,
-
-    accuracy = accuracy
-
+    accuracy = accuracy,
+    balanced_accuracy = balanced_accuracy,
+    kappa = kappa,
+    macro_f1 = macro_f1,
+    auc = auc_score,
+    tree_table = tree_table,
+    support_vectors = support_vectors_info
   ))
 }
 
@@ -684,7 +1254,8 @@ regression_model <- function(scale_train_x,
                              model = "multiple_linear",
                              degree = 2,
                              alpha = 0.5,
-                             k = 5) {
+                             k = 5,
+                             plot = TRUE) {
 
   # ==========================================
   # 1. VALIDATE INPUTS
@@ -776,8 +1347,13 @@ regression_model <- function(scale_train_x,
     warning("Some training features have zero variance.")
   }
 
-  # Make safe feature names
-  feature_names <- paste0("X", seq_len(ncol(train_x)))
+  # Preserve clean, valid feature names
+  raw_cols <- colnames(scale_train_x)
+  if (is.null(raw_cols) || any(raw_cols == "")) {
+    feature_names <- paste0("X", seq_len(ncol(train_x)))
+  } else {
+    feature_names <- make.names(raw_cols, unique = TRUE)
+  }
 
   colnames(train_x) <- feature_names
   colnames(test_x) <- feature_names
@@ -798,12 +1374,13 @@ regression_model <- function(scale_train_x,
   cat("====================================\n")
 
   fitted_model <- NULL
+  tree_table <- NULL
+  support_vectors_info <- NULL
 
   if (model %in% c("linear", "multiple_linear")) {
 
     # Simple / Multiple Linear Regression
-
-    fitted_model <- lm(
+    fitted_model <- stats::lm(
       target ~ .,
       data = train_df
     )
@@ -816,31 +1393,23 @@ regression_model <- function(scale_train_x,
   } else if (model == "polynomial") {
 
     # Polynomial Regression
-    # Creates powers of each feature, without interactions
-
     make_poly <- function(x, degree) {
-
       result <- as.data.frame(x)
-
+      cnames <- colnames(x)
       for (j in seq_len(ncol(x))) {
-
         for (d in 2:degree) {
-
-          result[[paste0("X", j, "_power_", d)]] <-
-            x[, j]^d
+          result[[paste0(cnames[j], "_power_", d)]] <- x[, j]^d
         }
       }
-
       result
     }
 
-    # Degree 1 terms are already present
     poly_train <- make_poly(train_x, degree)
     poly_test <- make_poly(test_x, degree)
 
     poly_train$target <- train_y
 
-    fitted_model <- lm(
+    fitted_model <- stats::lm(
       target ~ .,
       data = poly_train
     )
@@ -852,8 +1421,7 @@ regression_model <- function(scale_train_x,
 
   } else if (model %in% c("lasso", "ridge", "elastic_net")) {
 
-    # L1 / L2 / Elastic Net Regularization
-
+    # Regularized Generalized Linear Models
     if (model == "lasso") {
       alpha_value <- 1
     } else if (model == "ridge") {
@@ -882,7 +1450,6 @@ regression_model <- function(scale_train_x,
   } else if (model == "decision_tree") {
 
     # Decision Tree Regression
-
     fitted_model <- rpart::rpart(
       target ~ .,
       data = train_df,
@@ -897,7 +1464,6 @@ regression_model <- function(scale_train_x,
   } else if (model == "random_forest") {
 
     # Random Forest Regression
-
     fitted_model <- randomForest::randomForest(
       target ~ .,
       data = train_df,
@@ -910,13 +1476,17 @@ regression_model <- function(scale_train_x,
       newdata = test_df
     )
 
+    tree_table <- tryCatch(
+      randomForest::getTree(fitted_model, k = 1, labelVar = TRUE),
+      error = function(e) NULL
+    )
+
   } else if (model == "svm") {
 
     # Support Vector Regression
-
     fitted_model <- e1071::svm(
-      x = train_x,
-      y = train_y,
+      target ~ .,
+      data = train_df,
       type = "eps-regression",
       kernel = "radial",
       scale = FALSE
@@ -924,7 +1494,12 @@ regression_model <- function(scale_train_x,
 
     predictions <- predict(
       fitted_model,
-      newdata = test_x
+      newdata = test_df
+    )
+
+    support_vectors_info <- list(
+      total_sv = fitted_model$tot.nSV,
+      sv_indices = fitted_model$index
     )
   }
 
@@ -936,7 +1511,7 @@ regression_model <- function(scale_train_x,
   }
 
   # ==========================================
-  # 3. CALCULATE ERRORS
+  # 3. CALCULATE ERRORS AND ENRICHED METRICS
   # ==========================================
 
   residuals <- test_y - predictions
@@ -945,24 +1520,14 @@ regression_model <- function(scale_train_x,
   p <- ncol(train_x)
 
   MAE <- mean(abs(residuals))
-
   MSE <- mean(residuals^2)
-
   RMSE <- sqrt(MSE)
 
-  # ==========================================
-  # 4. R SQUARED
-  # ==========================================
-
+  # SST and R2
   SST <- sum((test_y - mean(test_y))^2)
-
   SSE <- sum(residuals^2)
 
-  R2 <- if (SST == 0) {
-    NA_real_
-  } else {
-    1 - SSE / SST
-  }
+  R2 <- if (SST == 0) NA_real_ else 1 - SSE / SST
 
   # Adjusted R2
   adjusted_R2 <- if (is.na(R2) || n <= p + 1) {
@@ -971,27 +1536,34 @@ regression_model <- function(scale_train_x,
     1 - (1 - R2) * (n - 1) / (n - p - 1)
   }
 
-  # ==========================================
-  # 5. MAPE
-  # ==========================================
-
+  # MAPE
   nonzero_indices <- which(test_y != 0)
-
   MAPE <- if (length(nonzero_indices) == 0) {
     NA_real_
   } else {
-    mean(
-      abs(
-        residuals[nonzero_indices] /
-          test_y[nonzero_indices]
-      )
-    ) * 100
+    mean(abs(residuals[nonzero_indices] / test_y[nonzero_indices])) * 100
   }
 
-  # ==========================================
-  # 6. EVALUATION TABLE
-  # ==========================================
+  # Pearson correlation between actual and predicted
+  pearson_r <- if (n >= 2 && stats::sd(test_y) > 0 && stats::sd(predictions) > 0) {
+    stats::cor(test_y, predictions)
+  } else {
+    NA_real_
+  }
 
+  # Normalized RMSE (NRMSE = RMSE / range)
+  y_range <- diff(range(test_y))
+  nrmse <- if (y_range > 0) RMSE / y_range else NA_real_
+
+  # Explained Variance Score
+  var_y <- stats::var(test_y)
+  var_diff <- stats::var(test_y - predictions)
+  exp_var <- if (var_y > 0) 1 - (var_diff / var_y) else NA_real_
+
+  # Max Absolute Error
+  max_error <- max(abs(residuals))
+
+  # Evaluation Table
   metrics <- data.frame(
     Metric = c(
       "MAE",
@@ -999,78 +1571,171 @@ regression_model <- function(scale_train_x,
       "RMSE",
       "R2",
       "Adjusted R2",
-      "MAPE (%)"
+      "MAPE (%)",
+      "Pearson r",
+      "NRMSE",
+      "Explained Variance",
+      "Max Error"
     ),
-
     Value = c(
       MAE,
       MSE,
       RMSE,
       R2,
       adjusted_R2,
-      MAPE
+      MAPE,
+      pearson_r,
+      nrmse,
+      exp_var,
+      max_error
     )
   )
 
-  # ==========================================
-  # 7. PREDICTION TABLE
-  # ==========================================
+  # Append AIC / BIC for linear models if applicable
+  if (inherits(fitted_model, "lm")) {
+    metrics <- rbind(
+      metrics,
+      data.frame(Metric = "AIC", Value = stats::AIC(fitted_model)),
+      data.frame(Metric = "BIC", Value = stats::BIC(fitted_model))
+    )
+  }
+
+  # Prediction Table
+  pct_error <- if (length(nonzero_indices) == n) {
+    abs(residuals / test_y) * 100
+  } else {
+    rep(NA_real_, n)
+  }
 
   prediction_table <- data.frame(
     Actual = test_y,
     Predicted = predictions,
-    Residual = residuals
+    Residual = residuals,
+    Pct_Error = round(pct_error, 2)
   )
 
   # ==========================================
-  # 8. DISPLAY RESULTS
+  # 4. DISPLAY RESULTS
   # ==========================================
 
   cat("\n========== REGRESSION METRICS ==========\n")
-
   print(metrics, row.names = FALSE)
 
-  cat("\n========== PREDICTION DETAILS ==========\n")
-
+  cat("\n========== PREDICTION DETAILS (Sample) ==========\n")
   print(head(prediction_table, 10))
 
   cat("\n========== MODEL SUMMARY ==========\n")
-
   cat("Model:", model, "\n")
   cat("Training observations:", length(train_y), "\n")
   cat("Testing observations:", n, "\n")
   cat("Number of features:", p, "\n")
+  cat("RMSE:", round(RMSE, 4), "\n")
+  cat("R-Squared:", ifelse(is.na(R2), "N/A", round(R2, 4)), "\n")
+  if (!is.na(pearson_r)) {
+    cat("Pearson r:", round(pearson_r, 4), "\n")
+  }
 
   # ==========================================
-  # 9. RETURN EVERYTHING
+  # 5. VISUALIZATIONS
+  # ==========================================
+
+  if (plot) {
+    old_par <- par(no.readonly = TRUE)
+    on.exit(par(old_par))
+    par(mfrow = c(2, 2), mar = c(4.2, 4.2, 3.2, 1.2))
+
+    # Panel 1: Predict and Actual Curve
+    draw_predict_actual(test_y, predictions, model_name = model)
+
+    # Panel 2: Actual vs Predicted Scatter Plot
+    plot(
+      test_y,
+      predictions,
+      pch = 19,
+      col = "#08519c",
+      cex = 1.2,
+      xlab = "Actual Target",
+      ylab = "Predicted Target",
+      main = "Actual vs Predicted Scatter"
+    )
+    abline(0, 1, lty = 2, col = "gray40", lwd = 2) # Ideal y = x
+    if (n >= 2 && stats::sd(test_y) > 0 && stats::sd(predictions) > 0) {
+      abline(stats::lm(predictions ~ test_y), col = "#de2d26", lwd = 2) # Fit trend
+    }
+    legend("topleft", legend = c("Ideal Fit (y = x)", "Model Fit Trend"),
+           col = c("gray40", "#de2d26"), lty = c(2, 1), lwd = 2, cex = 0.75, bg = "white")
+
+    # Panel 3: Residuals vs Predicted Plot
+    plot(
+      predictions,
+      residuals,
+      pch = 19,
+      col = "#3182bd",
+      cex = 1.1,
+      xlab = "Predicted Target",
+      ylab = "Residual (Actual - Predicted)",
+      main = "Residuals vs Predicted"
+    )
+    abline(h = 0, lty = 2, col = "#de2d26", lwd = 2)
+    # Add error bounds +/- RMSE
+    abline(h = c(RMSE, -RMSE), lty = 3, col = "gray50")
+
+    # Panel 4: Model-Specific Visualization
+    if (model == "decision_tree") {
+      draw_decision_tree(fitted_model, title = "Decision Tree (Regression)")
+    } else if (model == "random_forest") {
+      draw_random_forest(fitted_model, title = "Random Forest (Regression)")
+    } else if (model == "svm") {
+      # Highlight support vectors on regression residuals
+      plot(
+        predictions,
+        residuals,
+        pch = 19,
+        col = "#9ecae1",
+        cex = 1.1,
+        xlab = "Predicted Target",
+        ylab = "Residuals",
+        main = paste0("SVM Support Vectors (Total: ", fitted_model$tot.nSV, ")")
+      )
+      abline(h = 0, lty = 2, col = "#de2d26", lwd = 2)
+      eps <- fitted_model$epsilon
+      if (!is.null(eps)) {
+        abline(h = c(eps, -eps), lty = 3, col = "#238b45", lwd = 2)
+        legend("topright", legend = c(paste0("Margin tube +/- eps (", round(eps, 3), ")"), "Zero Residual"),
+               col = c("#238b45", "#de2d26"), lty = c(3, 2), lwd = 2, cex = 0.75, bg = "white")
+      }
+    } else if (model %in% c("lasso", "ridge", "elastic_net")) {
+      plot(fitted_model, main = paste0("CV MSE vs Log(Lambda) - ", toupper(model)))
+    } else if (model %in% c("linear", "multiple_linear", "polynomial")) {
+      # Residuals Normal Q-Q Plot
+      stats::qqnorm(residuals, pch = 19, col = "#3182bd", main = "Residuals Normal Q-Q Plot")
+      stats::qqline(residuals, col = "#de2d26", lwd = 2)
+    }
+  }
+
+  # ==========================================
+  # 6. RETURN EVERYTHING
   # ==========================================
 
   return(list(
-
     model = fitted_model,
-
     predictions = predictions,
-
     actual = test_y,
-
     residuals = residuals,
-
     prediction_table = prediction_table,
-
     metrics = metrics,
-
     MAE = MAE,
-
     MSE = MSE,
-
     RMSE = RMSE,
-
     R2 = R2,
-
     adjusted_R2 = adjusted_R2,
-
-    MAPE = MAPE
-
+    MAPE = MAPE,
+    pearson_r = pearson_r,
+    nrmse = nrmse,
+    explained_variance = exp_var,
+    max_error = max_error,
+    tree_table = tree_table,
+    support_vectors = support_vectors_info
   ))
 }
 
